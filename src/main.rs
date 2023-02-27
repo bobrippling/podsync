@@ -1,8 +1,14 @@
+use std::sync::Arc;
+
 use warp::{Filter, Reply};
 use serde::{Deserialize, Serialize};
 
+use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool, query, query_as, FromRow, /*Row, sqlite::SqliteRow*/};
+
 use tracing::{Level, info, error};
 use tracing_subscriber::FmtSubscriber;
+
+static DB_URL: &str = "sqlite://pod.sql";
 
 #[tokio::main]
 async fn main() {
@@ -11,6 +17,33 @@ async fn main() {
         .finish();
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    match Sqlite::create_database(DB_URL).await {
+        Ok(()) => {
+            info!("Created database {}", DB_URL);
+        }
+        Err(e) => {
+            let sqlx::Error::Database(db_err) = e else {
+                panic!("error creating database: {e}");
+            };
+
+            panic!("sql db error: {db_err:?}");//.code()
+        }
+    }
+
+    let db = SqlitePool::connect(DB_URL).await.expect("couldn't connect to DB");
+    let db = Arc::new(db);
+
+    query!("
+        CREATE TABLE IF NOT EXISTS devices (
+            id TEXT NOT NULL,
+            caption TEXT NOT NULL,
+            username TEXT NOT NULL
+        );
+    ")
+        .execute(&*db)
+        .await
+        .expect("couldn't create devices table");
 
     let login = warp::path!("api" / "2" / "auth" / String / "login.json")
         .and(warp::post())
@@ -27,49 +60,59 @@ async fn main() {
     let devices = {
         let for_user = warp::path!("api" / "2" / "devices" / String)
             .and(warp::get())
-            .map(|username_format: String| {
-                println!("get devices for {username_format}");
+            .then({
+                let db = Arc::clone(&db);
+                move |username_format: String| {
+                    let db = Arc::clone(&db);
 
-                let (_username, format) = match username_format.split_once('.') {
-                    Some(tup) => tup,
-                    None => return warp::reply::with_status(
-                        warp::reply(),
-                        warp::http::StatusCode::BAD_REQUEST
-                    ).into_response(),
-                };
+                    async move {
+                        let (username, format) = match username_format.split_once('.') {
+                            Some(tup) => tup,
+                            None => return warp::reply::with_status(
+                                warp::reply(),
+                                warp::http::StatusCode::BAD_REQUEST
+                                ).into_response(),
+                        };
 
-                if format != "json" {
-                    return warp::reply::with_status(
-                        warp::reply(),
-                        warp::http::StatusCode::UNPROCESSABLE_ENTITY,
-                    ).into_response();
+                        if format != "json" {
+                            return warp::reply::with_status(
+                                warp::reply(),
+                                warp::http::StatusCode::UNPROCESSABLE_ENTITY,
+                                ).into_response();
+                        }
+
+                        let query = query_as!(
+                            Device,
+                            "SELECT * FROM devices WHERE username = ?",
+                            username,
+                        )
+                            .fetch_all(&*db)
+                            .await;
+
+                        let devices = match query {
+                            Ok(d) => d,
+                            Err(e) => {
+                                error!("select error: {:?}", e);
+
+                                return warp::reply::with_status(
+                                    warp::reply(),
+                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                ).into_response();
+                            }
+                        };
+
+                        // let devices: [Device; 1] = [
+                        //     Device {
+                        //         id: "test".into(),
+                        //         caption: "test".into(),
+                        //         r#type: DeviceType::Mobile,
+                        //         subscriptions: 1,
+                        //     },
+                        // ];
+
+                        warp::reply::json(&devices).into_response()
+                    }
                 }
-
-                let (username, format) = match username_format.split_once('.') {
-                    Some(tup) => tup,
-                    None => return warp::reply::with_status(
-                        warp::reply(),
-                        warp::http::StatusCode::BAD_REQUEST
-                        ).into_response(),
-                };
-
-                if format != "json" {
-                    return warp::reply::with_status(
-                        warp::reply(),
-                        warp::http::StatusCode::UNPROCESSABLE_ENTITY,
-                        ).into_response();
-                }
-
-                let devices: [Device; 1] = [
-                    Device {
-                        id: "test".into(),
-                        caption: "test".into(),
-                        r#type: DeviceType::Mobile,
-                        subscriptions: 1,
-                    },
-                ];
-
-                warp::reply::json(&devices).into_response()
             });
 
         let create = warp::path!("api" / "2" / "devices" / String / String)
@@ -86,7 +129,8 @@ async fn main() {
     };
 
     let subscriptions = {
-        let get = warp::path!("api" / "2" / "subscriptions" / String / String)
+        let get = warp::path!("api" / "2" / "subscriptions" / String / String) // FIXME: merge this
+                                                                               // with the below path (same for /episodes)
             .and(warp::get())
             .map(|username, deviceid_format| {
                 println!("got subscriptions for {deviceid_format} for {username}");
@@ -169,13 +213,32 @@ async fn main() {
         .await;
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize, FromRow)]
 struct Device {
     id: String,
     caption: String,
+
+    #[sqlx(try_from = "String")]
     r#type: DeviceType,
+
     subscriptions: i64,
+
+    #[serde(skip)]
+    username: String,
 }
+
+// impl FromRow<'_, SqliteRow> for Device {
+//     fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
+//         let ty: &str = row.try_get("type")?;
+//         Ok(Self {
+//             id: row.try_get("id")?,
+//             caption: row.try_get("caption")?,
+//             r#type: ty.try_into().unwrap(),
+//             subscriptions: row.try_get("subscriptions")?,
+//             username: row.try_get("username")?,
+//         })
+//     }
+// }
 
 #[derive(Debug, Deserialize, Serialize)] // FIXME: drop Serialize
 struct DeviceCreate { // FIXME: allow "" to deserialise to this
@@ -187,6 +250,25 @@ struct DeviceCreate { // FIXME: allow "" to deserialise to this
 enum DeviceType {
     #[serde(rename = "mobile")]
     Mobile,
+}
+
+impl TryFrom<&'_ str> for DeviceType {
+    type Error = ();
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "Mobile" => Ok(DeviceType::Mobile),
+            _ => Err(())
+        }
+    }
+}
+
+impl TryFrom<String> for DeviceType {
+    type Error = ();
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::try_from(&*s)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
