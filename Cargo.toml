@@ -10,3 +10,4 @@ warp = "0.3"
 # bytes = "1.1.0"
 tracing = "0.1.37"
 tracing-subscriber = "0.3.16"
+time = { version = "0.3.20", features = ["serde", "formatting", "parsing", "macros"] }
