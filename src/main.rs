@@ -80,7 +80,11 @@ async fn main() {
 
                         let query = query_as!(
                             Device,
-                            "SELECT * FROM devices WHERE username = ?",
+                            r#"
+                            SELECT id, caption, type as "type: _", subscriptions, username
+                            FROM devices
+                            WHERE username = ?
+                            "#,
                             username,
                         )
                             .fetch_all(&*db)
@@ -212,10 +216,10 @@ async fn main() {
 
 #[derive(Debug, Serialize, FromRow)]
 struct Device {
-    id: String,
+    id: i64, // FIXME: String, convert when pulling out of the DB? change the DB type?
     caption: String,
 
-    #[sqlx(try_from = "String")]
+    // #[sqlx(try_from = "String")]
     r#type: DeviceType,
 
     subscriptions: i64,
@@ -243,10 +247,12 @@ struct DeviceCreate { // FIXME: allow "" to deserialise to this
     r#type: Option<DeviceType>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, sqlx::Type)]
+// #[sqlx(transparent)]
 enum DeviceType {
     #[serde(rename = "mobile")]
     Mobile,
+    Unknown,
 }
 
 impl TryFrom<&'_ str> for DeviceType {
