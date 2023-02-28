@@ -118,12 +118,46 @@ async fn main() {
 
         let create = warp::path!("api" / "2" / "devices" / String / String)
             .and(warp::post())
-            .and(warp::body::json())
-            .map(|username, device_name, device: DeviceCreate| {
-                // device_name is device id
-                println!("got device creation {device_name} for {username}: {device:?}");
+            .and(warp::body::json()) // TODO: this may just be an empty string
+            .then({
+                let db = Arc::clone(&db);
+                move |username, device_name, new_device: DeviceCreate| {
+                    let db = Arc::clone(&db);
+                    async move {
+                        // device_name is device id
+                        // FIXME: use device_name
+                        println!("got device creation {device_name} for {username}: {new_device:?}");
 
-                warp::reply()
+                        let caption = new_device.caption.as_deref().unwrap_or("");
+                        let r#type = new_device.r#type.unwrap_or(DeviceType::Unknown);
+
+                        let query = query!(
+                            "INSERT INTO devices
+                            (caption, type, username, subscriptions)
+                            VALUES
+                            (?, ?, ?, ?)",
+                            caption,
+                            r#type,
+                            username,
+                            0,
+                        )
+                            .execute(&*db)
+                            .await;
+
+                        match query {
+                            Ok(_) => warp::reply().into_response(),
+                            Err(e) => {
+                                // FIXME: handle EEXIST (and others?)
+                                error!("insert error: {:?}", e);
+
+                                warp::reply::with_status(
+                                    warp::reply(),
+                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                    ).into_response()
+                            }
+                        }
+                    }
+                }
             });
 
         for_user.or(create)
