@@ -31,8 +31,9 @@ async fn main() {
         }
     }
 
-    let db = SqlitePool::connect(DB_URL).await.expect("couldn't connect to DB");
-    let db = Arc::new(db);
+    let db = SqlitePool::connect(DB_URL)
+        .await
+        .expect("DB connection");
 
     query!("
         CREATE TABLE IF NOT EXISTS devices (
@@ -44,6 +45,8 @@ async fn main() {
         .execute(&*db)
         .await
         .expect("couldn't create devices table");
+
+    let db = Arc::new(db);
 
     let login = warp::path!("api" / "2" / "auth" / String / "login.json")
         .and(warp::post())
