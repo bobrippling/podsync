@@ -35,16 +35,10 @@ async fn main() {
         .await
         .expect("DB connection");
 
-    query!("
-        CREATE TABLE IF NOT EXISTS devices (
-            id TEXT NOT NULL,
-            caption TEXT NOT NULL,
-            username TEXT NOT NULL
-        );
-    ")
-        .execute(&*db)
+    sqlx::migrate!("./migrations")
+        .run(&db)
         .await
-        .expect("couldn't create devices table");
+        .expect("migration");
 
     let db = Arc::new(db);
 
