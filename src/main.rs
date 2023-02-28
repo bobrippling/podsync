@@ -180,24 +180,89 @@ async fn main() {
         let upload = warp::path!("api" / "2" / "subscriptions" / String / String)
             .and(warp::post())
             .and(warp::body::json())
-            .map(|username, deviceid_format, sub_changes: SubscriptionChanges| {
-                println!("got urls for {username}'s device {deviceid_format}, timestamp {:?}:", sub_changes.timestamp);
+            .then({
+                let db = Arc::clone(&db);
+                move |username, deviceid_format, sub_changes: SubscriptionChanges| {
+                    let db = Arc::clone(&db);
 
-                // println!("add:");
-                // for url in &sub_changes.add {
-                //     println!("  {url}");
-                // }
-                // println!("remove:");
-                // for url in &sub_changes.remove {
-                //     println!("  {url}");
-                // }
+                    async move {
+                        println!("got urls for {username}'s device {deviceid_format}, timestamp {:?}:", sub_changes.timestamp);
 
-                warp::reply::json(
-                    &UpdatedUrls {
-                        timestamp: 0,
-                        update_urls: sub_changes.add.into_iter().map(|url| [url.clone(), url]).collect()
-                    })
-                    .into_response()
+                        let mut tx = match db.begin().await {
+                            Ok(tx) => tx,
+                            Err(e) => {
+                                error!("transaction begin: {:?}", e);
+
+                                return warp::reply::with_status(
+                                    warp::reply(),
+                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                    ).into_response()
+                            }
+                        };
+
+                        for url in &sub_changes.remove {
+                            let query = query!(
+                                "DELETE FROM subscriptions WHERE url = ?",
+                                url
+                            )
+                                .execute(&mut tx)
+                                .await;
+
+                            if let Err(e) = query {
+                                error!("transaction addition: {:?}", e);
+
+                                return warp::reply::with_status(
+                                    warp::reply(),
+                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                ).into_response();
+                            }
+                        }
+
+                        for url in &sub_changes.add {
+                            let query = query!(
+                                "
+                                INSERT INTO subscriptions
+                                (url, username, device)
+                                VALUES
+                                (?, ?, ?)
+                                ",
+                                url,
+                                username,
+                                device,
+                            )
+                                .execute(&mut tx)
+                                .await;
+
+                            if let Err(e) = query {
+                                error!("transaction addition: {:?}", e);
+
+                                return warp::reply::with_status(
+                                    warp::reply(),
+                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                ).into_response();
+                            }
+                        }
+
+                        match tx.commit().await {
+                            Ok(()) => {
+                                warp::reply::json(
+                                    &UpdatedUrls {
+                                        timestamp: 0, // TODO
+                                        update_urls: vec![], // unused by client
+                                    })
+                                .into_response()
+                            }
+                            Err(e) => {
+                                error!("transaction commit: {:?}", e);
+
+                                warp::reply::with_status(
+                                    warp::reply(),
+                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                    ).into_response()
+                            }
+                        }
+                    }
+                }
             });
 
         get.or(upload)
