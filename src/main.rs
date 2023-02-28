@@ -249,8 +249,8 @@ struct DeviceCreate { // FIXME: allow "" to deserialise to this
 
 #[derive(Debug, Deserialize, Serialize, sqlx::Type)]
 // #[sqlx(transparent)]
+#[serde(rename_all = "lowercase")]
 enum DeviceType {
-    #[serde(rename = "mobile")]
     Mobile,
     Unknown,
 }
