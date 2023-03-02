@@ -8,6 +8,9 @@ use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool, query, query_as, FromRo
 use tracing::{Level, info, error};
 use tracing_subscriber::FmtSubscriber;
 
+mod episode;
+use episode::{EpisodeChanges, EpisodeChangeWithDevice, EpisodeChangeRaw};
+
 static DB_URL: &str = "sqlite://pod.sql";
 
 #[tokio::main]
@@ -63,6 +66,7 @@ async fn main() {
                     let db = Arc::clone(&db);
 
                     async move {
+                        // let (username, format) = split_format(username_format)?; // FIXME: ? -> return 40?
                         let (username, format) = match username_format.split_once('.') {
                             Some(tup) => tup,
                             None => return warp::reply::with_status(
@@ -182,11 +186,19 @@ async fn main() {
             .and(warp::body::json())
             .then({
                 let db = Arc::clone(&db);
-                move |username, deviceid_format, sub_changes: SubscriptionChanges| {
+                move |username, deviceid_format: String, sub_changes: SubscriptionChanges| {
                     let db = Arc::clone(&db);
 
                     async move {
-                        println!("got urls for {username}'s device {deviceid_format}, timestamp {:?}:", sub_changes.timestamp);
+                        let (device_id, _format /*FIXME: check*/) = match deviceid_format.split_once('.') {
+                            Some(tup) => tup,
+                            None => return warp::reply::with_status(
+                                warp::reply(),
+                                warp::http::StatusCode::BAD_REQUEST
+                            ).into_response(),
+                        };
+
+                        println!("got urls for {username}'s device {device_id}, timestamp {:?}:", sub_changes.timestamp);
 
                         let mut tx = match db.begin().await {
                             Ok(tx) => tx,
@@ -225,10 +237,12 @@ async fn main() {
                                 (url, username, device)
                                 VALUES
                                 (?, ?, ?)
+                                ON CONFLICT (url, username, device)
+                                DO NOTHING
                                 ",
                                 url,
                                 username,
-                                device,
+                                device_id,
                             )
                                 .execute(&mut tx)
                                 .await;
@@ -258,7 +272,7 @@ async fn main() {
                                 warp::reply::with_status(
                                     warp::reply(),
                                     warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                    ).into_response()
+                                ).into_response()
                             }
                         }
                     }
@@ -272,31 +286,163 @@ async fn main() {
         let get = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::get())
             .and(warp::query())
-            .map(|username_format, query: QuerySince| {
-                println!("episodes GET for {username_format} since {query:?}");
+            .then({
+                let db = Arc::clone(&db);
 
-                warp::reply::json(
-                    &EpisodeChanges {
-                        timestamp: 0,
-                        actions: vec![],
-                    })
+                move |username_format: String, query: QuerySince| {
+                    let _db = Arc::clone(&db);
+
+                    async move {
+                        // podcast, episode, action, timestamp?, guid?, ...{started,position,total}?
+                        println!("episodes GET for {username_format} since {query:?}");
+
+                        let (_username, format) = match username_format.split_once('.') {
+                            Some(tup) => tup,
+                            None => return warp::reply::with_status(
+                                warp::reply(),
+                                warp::http::StatusCode::BAD_REQUEST
+                            ).into_response(),
+                        };
+
+                        if format != "json" {
+                            return warp::reply::with_status(
+                                warp::reply(),
+                                warp::http::StatusCode::UNPROCESSABLE_ENTITY,
+                                ).into_response();
+                        }
+
+                        // let query = query_as!(
+                        //     EpisodeChangeRaw,
+                        //     r#"
+                        //     SELECT podcast, episode, timestamp, guid, action, started, position, total
+                        //     FROM episodes
+                        //     WHERE username = ?
+                        //     "#,
+                        //     username,
+                        // )
+                        //     .fetch_all(&*db)
+                        //     .await;
+
+                        warp::reply::json(&EpisodeChanges::empty_at(0)).into_response()
+                    }
+                }
             });
 
         let upload = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::post())
             .and(warp::body::json())
-            .map(|username_format, body: Vec<EpisodeActionUpload>| {
-                println!("episodes POST for {username_format}");
+            .then({
+                let db = Arc::clone(&db);
+                move |username_format: String, body: Vec<EpisodeChangeWithDevice>| {
+                    let db = Arc::clone(&db);
 
-                for action in &body {
-                    println!("  {:?}", action);
+                    async move {
+                        // podcast, episode, guid: optional
+                        println!("episodes POST for {username_format}");
+
+                        let (username, format) = match username_format.split_once('.') {
+                            Some(tup) => tup,
+                            None => return warp::reply::with_status(
+                                warp::reply(),
+                                warp::http::StatusCode::BAD_REQUEST
+                            ).into_response(),
+                        };
+
+                        if format != "json" {
+                            return warp::reply::with_status(
+                                warp::reply(),
+                                warp::http::StatusCode::UNPROCESSABLE_ENTITY,
+                                ).into_response();
+                        }
+
+                        let mut tx = match db.begin().await {
+                            Ok(tx) => tx,
+                            Err(e) => {
+                                error!("transaction begin: {:?}", e);
+
+                                return warp::reply::with_status(
+                                    warp::reply(),
+                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                    ).into_response()
+                            }
+                        };
+
+                        for EpisodeChangeWithDevice { change, device } in body {
+                            println!("updating: {change:?} device={device}");
+
+                            let EpisodeChangeRaw {
+                                podcast, episode, timestamp, guid,
+                                action, started, position, total,
+                            } = change.into();
+
+                            let query = query!(
+                                "
+                                INSERT INTO episodes
+                                (
+                                    username, device, podcast,
+                                    episode, timestamp, guid,
+                                    action,
+                                    started, position, total
+                                )
+                                VALUES
+                                (
+                                    ?, ?, ?,
+                                    ?, ?, ?,
+                                    ?,
+                                    ?, ?, ?
+                                )
+                                ON CONFLICT (username, device, podcast, episode)
+                                DO
+                                    UPDATE SET
+                                        timestamp = ?,
+                                        guid = ?,
+                                        action = ?,
+                                        started = ?,
+                                        position = ?,
+                                        total = ?
+                                ",
+                                username, device, podcast,
+                                episode, timestamp, guid,
+                                action,
+                                started, position, total,
+                                //
+                                timestamp, guid,
+                                action,
+                                started, position, total
+                            )
+                                .execute(&mut tx)
+                                .await;
+
+                            if let Err(e) = query {
+                                error!("transaction addition: {:?}", e);
+
+                                return warp::reply::with_status(
+                                    warp::reply(),
+                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                ).into_response();
+                            }
+                        }
+
+                        match tx.commit().await {
+                            Ok(()) => {
+                                warp::reply::json(
+                                    &UpdatedUrls { // FIXME: rename struct
+                                        timestamp: 0, // FIXME: timestamping
+                                        update_urls: vec![], // unused by client
+                                    }
+                                ).into_response()
+                            }
+                            Err(e) => {
+                                error!("transaction commit: {:?}", e);
+
+                                warp::reply::with_status(
+                                    warp::reply(),
+                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                ).into_response()
+                            }
+                        }
+                    }
                 }
-
-                warp::reply::json(
-                    &UpdatedUrls { // FIXME: rename struct
-                        timestamp: 0, // FIXME: timestamping
-                        update_urls: vec![], // unused by client
-                    })
             });
 
         get.or(upload)
@@ -411,49 +557,8 @@ struct SubscriptionChanges {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct EpisodeChanges {
-    timestamp: u32,
-    actions: Vec<EpisodeAction>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 struct QuerySince {
     since: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct EpisodeAction {
-    podcast: String,
-    episode: String,
-    #[serde(with = "time::serde::rfc3339")]
-    timestamp: time::OffsetDateTime, // yyyy-MM-dd'T'HH:mm:ss;
-    guid: Option<String>,
-    action: EpisodeActionE,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase", untagged)]
-enum EpisodeActionE {
-    New,
-    Download,
-    Play {
-        started: u32,
-        position: u32,
-        total: u32,
-    },
-    Delete,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct EpisodeActionUpload {
-    podcast: String,
-    episode: String,
-    #[serde(with = "time_custom")]
-    timestamp: time::PrimitiveDateTime,
-    guid: Option<String>,
-    #[serde(flatten)] // TODO: use this to combine common fields across types
-    action: EpisodeActionE, // FIXME: spread EpisodeActionE into this type
-    device: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -461,9 +566,3 @@ struct UpdatedUrls {
     timestamp: u32,
     update_urls: Vec<[String; 2]>,
 }
-
-time::serde::format_description!( // FIXME: swap to chrono & Utc.datetime_from_str(<time>, <fmt>) ?
-    time_custom,
-    PrimitiveDateTime,
-    "[year]-[month]-[day]T[hour]:[minute]:[second]" // yyyy-MM-dd'T'HH:mm:ss
-);
