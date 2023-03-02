@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    future::Future,
+};
 
 use warp::{Filter, Reply};
 use serde::{Deserialize, Serialize};
@@ -16,6 +19,9 @@ use subscription::SubscriptionChanges;
 
 mod episode;
 use episode::{EpisodeChanges, EpisodeChangeWithDevice, EpisodeChangeRaw};
+
+mod podsync;
+use podsync::PodSync;
 
 static DB_URL: &str = "sqlite://pod.sql";
 
@@ -49,71 +55,25 @@ async fn main() {
         .await
         .expect("migration");
 
-    let db = Arc::new(db);
+    let podsync = Arc::new(PodSync::new(db));
 
     let login = warp::path!("api" / "2" / "auth" / String / "login.json")
         .and(warp::post())
         .and(warp::header("authorization"))
-        .map(|username, auth: String| {
-            eprintln!("todo: auth or {username}: {auth}");
-
-            warp::reply::with_status(
-                warp::reply(),
-                warp::http::StatusCode::OK // UNAUTHORIZED
-            )
+        .then({
+            let podsync = Arc::clone(&podsync);
+            move |username: String, auth: String| {
+                map_err_into_status(|| podsync.login(username, auth))
+            }
         });
 
     let devices = {
         let for_user = warp::path!("api" / "2" / "devices" / String)
             .and(warp::get())
             .then({
-                let db = Arc::clone(&db);
+                let podsync = Arc::clone(&podsync);
                 move |username_format: String| {
-                    let db = Arc::clone(&db);
-
-                    async move {
-                        // let (username, format) = split_format(username_format)?; // FIXME: ? -> return 40?
-                        let (username, format) = match username_format.split_once('.') {
-                            Some(tup) => tup,
-                            None => return warp::reply::with_status(
-                                warp::reply(),
-                                warp::http::StatusCode::BAD_REQUEST
-                                ).into_response(),
-                        };
-
-                        if format != "json" {
-                            return warp::reply::with_status(
-                                warp::reply(),
-                                warp::http::StatusCode::UNPROCESSABLE_ENTITY,
-                                ).into_response();
-                        }
-
-                        let query = query_as!(
-                            Device,
-                            r#"
-                            SELECT id, caption, type as "type: _", subscriptions, username
-                            FROM devices
-                            WHERE username = ?
-                            "#,
-                            username,
-                        )
-                            .fetch_all(&*db)
-                            .await;
-
-                        let devices = match query {
-                            Ok(d) => d,
-                            Err(e) => {
-                                error!("select error: {:?}", e);
-
-                                return warp::reply::with_status(
-                                    warp::reply(),
-                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                ).into_response();
-                            }
-                        };
-
-                        warp::reply::json(&devices).into_response()
-                    }
+                    map_err_into_status(|| podsync.devices(username_format))
                 }
             });
 
@@ -450,6 +410,19 @@ async fn main() {
     warp::serve(routes)
         .run(([0, 0, 0, 0], 8080))
         .await;
+}
+
+async fn map_err_into_status<CB, F>(cb: CB) -> impl warp::Reply
+where
+    CB: FnOnce() -> F,
+    F: Future<Output = Result<(), warp::http::StatusCode>>,
+{
+    let status = match cb().await {
+        Ok(()) => warp::http::StatusCode::OK,
+        Err(status) => status,
+    };
+
+    warp::reply::with_status(warp::reply(), status)
 }
 
 #[derive(Debug, Deserialize, Serialize)]
