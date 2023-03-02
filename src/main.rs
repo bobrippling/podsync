@@ -3,10 +3,16 @@ use std::sync::Arc;
 use warp::{Filter, Reply};
 use serde::{Deserialize, Serialize};
 
-use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool, query, query_as, FromRow, /*Row, sqlite::SqliteRow*/};
+use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool, query, query_as};
 
 use tracing::{Level, info, error};
 use tracing_subscriber::FmtSubscriber;
+
+mod device;
+use device::{Device, DeviceType, DeviceCreate};
+
+mod subscription;
+use subscription::SubscriptionChanges;
 
 mod episode;
 use episode::{EpisodeChanges, EpisodeChangeWithDevice, EpisodeChangeRaw};
@@ -106,15 +112,6 @@ async fn main() {
                             }
                         };
 
-                        // let devices: [Device; 1] = [
-                        //     Device {
-                        //         id: "test".into(),
-                        //         caption: "test".into(),
-                        //         r#type: DeviceType::Mobile,
-                        //         subscriptions: 1,
-                        //     },
-                        // ];
-
                         warp::reply::json(&devices).into_response()
                     }
                 }
@@ -174,11 +171,7 @@ async fn main() {
             .map(|username, deviceid_format| {
                 println!("got subscriptions for {deviceid_format} for {username}");
 
-                warp::reply::json(&SubscriptionChanges {
-                    add: vec![],
-                    remove: vec![],
-                    timestamp: Some(0),
-                })
+                warp::reply::json(&SubscriptionChanges::empty())
             });
 
         let upload = warp::path!("api" / "2" / "subscriptions" / String / String)
@@ -457,103 +450,6 @@ async fn main() {
     warp::serve(routes)
         .run(([0, 0, 0, 0], 8080))
         .await;
-}
-
-#[derive(Debug, Serialize, FromRow)]
-struct Device {
-    id: i64, // FIXME: String, convert when pulling out of the DB? change the DB type?
-    caption: String,
-
-    // #[sqlx(try_from = "String")]
-    r#type: DeviceType,
-
-    subscriptions: i64,
-
-    #[serde(skip)]
-    username: String,
-}
-
-// impl FromRow<'_, SqliteRow> for Device {
-//     fn from_row(row: &SqliteRow) -> Result<Self, sqlx::Error> {
-//         let ty: &str = row.try_get("type")?;
-//         Ok(Self {
-//             id: row.try_get("id")?,
-//             caption: row.try_get("caption")?,
-//             r#type: ty.try_into().unwrap(),
-//             subscriptions: row.try_get("subscriptions")?,
-//             username: row.try_get("username")?,
-//         })
-//     }
-// }
-
-#[derive(Debug, Deserialize, Serialize)] // FIXME: drop Serialize
-struct DeviceCreate { // FIXME: allow "" to deserialise to this
-    caption: Option<String>,
-    r#type: Option<DeviceType>,
-}
-
-#[derive(Debug, Deserialize, Serialize, sqlx::Type)]
-// #[sqlx(transparent)]
-#[serde(rename_all = "lowercase")]
-enum DeviceType {
-    Mobile,
-    Unknown,
-}
-
-impl TryFrom<&'_ str> for DeviceType {
-    type Error = ();
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "Mobile" => Ok(DeviceType::Mobile),
-            _ => Err(())
-        }
-    }
-}
-
-impl TryFrom<String> for DeviceType {
-    type Error = ();
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Self::try_from(&*s)
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct DeviceId(String);
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Subscription {
-    url: String,
-    title: String,
-    author: String,
-    description: String,
-    subscribers: u32,
-    logo_url: String,
-    scaled_logo_url: String,
-    website: String,
-    mygpo_link: String,
-}
-// let subscriptions: [&'static str; 1] = [
-//     "http://test.com",
-//     // Subscription {
-//     //     url: "http://test.com".into(),
-//     //     title: "test pod".into(),
-//     //     author: "rob".into(),
-//     //     description: "a test podcast".into(),
-//     //     subscribers: 2,
-//     //     logo_url: "https://avatars.githubusercontent.com/u/205673?s=40&v=4".into(),
-//     //     scaled_logo_url: "https://avatars.githubusercontent.com/u/205673?s=40&v=4".into(),
-//     //     website: "https://github.com/bobrippling".into(),
-//     //     mygpo_link: "https://github.com/bobrippling".into(),
-//     // },
-// ];
-
-#[derive(Debug, Deserialize, Serialize)]
-struct SubscriptionChanges {
-    add: Vec<String>, // TODO: make these &str?
-    remove: Vec<String>,
-    timestamp: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
