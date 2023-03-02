@@ -1,24 +1,20 @@
-use std::{
-    sync::Arc,
-    future::Future,
-};
+use std::sync::Arc;
 
 use warp::{Filter, Reply};
 use serde::{Deserialize, Serialize};
 
-use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool, query, query_as};
+use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 
-use tracing::{Level, info, error};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod device;
-use device::{Device, DeviceType, DeviceCreate};
 
 mod subscription;
 use subscription::SubscriptionChanges;
 
 mod episode;
-use episode::{EpisodeChanges, EpisodeChangeWithDevice, EpisodeChangeRaw};
+use episode::EpisodeChangeWithDevice;
 
 mod podsync;
 use podsync::PodSync;
@@ -63,7 +59,10 @@ async fn main() {
         .then({
             let podsync = Arc::clone(&podsync);
             move |username: String, auth: String| {
-                map_err_into_status(|| podsync.login(username, auth))
+                let podsync = Arc::clone(&podsync);
+                async move {
+                    map_into_status(podsync.login(username, auth).await)
+                }
             }
         });
 
@@ -73,7 +72,10 @@ async fn main() {
             .then({
                 let podsync = Arc::clone(&podsync);
                 move |username_format: String| {
-                    map_err_into_status(|| podsync.devices(username_format))
+                    let podsync = Arc::clone(&podsync);
+                    async move {
+                        map_into_json(podsync.devices(username_format).await)
+                    }
                 }
             });
 
@@ -81,42 +83,11 @@ async fn main() {
             .and(warp::post())
             .and(warp::body::json()) // TODO: this may just be an empty string
             .then({
-                let db = Arc::clone(&db);
-                move |username, device_name, new_device: DeviceCreate| {
-                    let db = Arc::clone(&db);
+                let podsync = Arc::clone(&podsync);
+                move |username, device_name, device| {
+                    let podsync = Arc::clone(&podsync);
                     async move {
-                        // device_name is device id
-                        // FIXME: use device_name
-                        println!("got device creation {device_name} for {username}: {new_device:?}");
-
-                        let caption = new_device.caption.as_deref().unwrap_or("");
-                        let r#type = new_device.r#type.unwrap_or(DeviceType::Unknown);
-
-                        let query = query!(
-                            "INSERT INTO devices
-                            (caption, type, username, subscriptions)
-                            VALUES
-                            (?, ?, ?, ?)",
-                            caption,
-                            r#type,
-                            username,
-                            0,
-                        )
-                            .execute(&*db)
-                            .await;
-
-                        match query {
-                            Ok(_) => warp::reply().into_response(),
-                            Err(e) => {
-                                // FIXME: handle EEXIST (and others?)
-                                error!("insert error: {:?}", e);
-
-                                warp::reply::with_status(
-                                    warp::reply(),
-                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                    ).into_response()
-                            }
-                        }
+                        map_into_status(podsync.create_device(username, device_name, device).await)
                     }
                 }
             });
@@ -128,106 +99,25 @@ async fn main() {
         let get = warp::path!("api" / "2" / "subscriptions" / String / String) // FIXME: merge this
                                                                                // with the below path (same for /episodes)
             .and(warp::get())
-            .map(|username, deviceid_format| {
-                println!("got subscriptions for {deviceid_format} for {username}");
-
-                warp::reply::json(&SubscriptionChanges::empty())
+            .then({
+                let podsync = Arc::clone(&podsync);
+                move |username, deviceid_format| {
+                    let podsync = Arc::clone(&podsync);
+                    async move {
+                        map_into_json(podsync.subscriptions(username, deviceid_format).await)
+                    }
+                }
             });
 
         let upload = warp::path!("api" / "2" / "subscriptions" / String / String)
             .and(warp::post())
             .and(warp::body::json())
             .then({
-                let db = Arc::clone(&db);
-                move |username, deviceid_format: String, sub_changes: SubscriptionChanges| {
-                    let db = Arc::clone(&db);
-
+                let podsync = Arc::clone(&podsync);
+                move |username, deviceid_format: String, changes: SubscriptionChanges| {
+                    let podsync = Arc::clone(&podsync);
                     async move {
-                        let (device_id, _format /*FIXME: check*/) = match deviceid_format.split_once('.') {
-                            Some(tup) => tup,
-                            None => return warp::reply::with_status(
-                                warp::reply(),
-                                warp::http::StatusCode::BAD_REQUEST
-                            ).into_response(),
-                        };
-
-                        println!("got urls for {username}'s device {device_id}, timestamp {:?}:", sub_changes.timestamp);
-
-                        let mut tx = match db.begin().await {
-                            Ok(tx) => tx,
-                            Err(e) => {
-                                error!("transaction begin: {:?}", e);
-
-                                return warp::reply::with_status(
-                                    warp::reply(),
-                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                    ).into_response()
-                            }
-                        };
-
-                        for url in &sub_changes.remove {
-                            let query = query!(
-                                "DELETE FROM subscriptions WHERE url = ?",
-                                url
-                            )
-                                .execute(&mut tx)
-                                .await;
-
-                            if let Err(e) = query {
-                                error!("transaction addition: {:?}", e);
-
-                                return warp::reply::with_status(
-                                    warp::reply(),
-                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                ).into_response();
-                            }
-                        }
-
-                        for url in &sub_changes.add {
-                            let query = query!(
-                                "
-                                INSERT INTO subscriptions
-                                (url, username, device)
-                                VALUES
-                                (?, ?, ?)
-                                ON CONFLICT (url, username, device)
-                                DO NOTHING
-                                ",
-                                url,
-                                username,
-                                device_id,
-                            )
-                                .execute(&mut tx)
-                                .await;
-
-                            if let Err(e) = query {
-                                error!("transaction addition: {:?}", e);
-
-                                return warp::reply::with_status(
-                                    warp::reply(),
-                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                ).into_response();
-                            }
-                        }
-
-                        match tx.commit().await {
-                            Ok(()) => {
-                                warp::reply::json(
-                                    &UpdatedUrls {
-                                        timestamp: 0, // TODO
-                                        update_urls: vec![], // unused by client
-                                    })
-                                .into_response()
-                            }
-                            Err(e) => {
-                                error!("transaction commit: {:?}", e);
-
-                                warp::reply::with_status(
-                                    warp::reply(),
-                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                ).into_response()
-                            }
-                        }
+                        map_into_json(podsync.update_subscriptions(username, deviceid_format, changes).await)
                     }
                 }
             });
@@ -240,43 +130,11 @@ async fn main() {
             .and(warp::get())
             .and(warp::query())
             .then({
-                let db = Arc::clone(&db);
-
+                let podsync = Arc::clone(&podsync);
                 move |username_format: String, query: QuerySince| {
-                    let _db = Arc::clone(&db);
-
+                    let podsync = Arc::clone(&podsync);
                     async move {
-                        // podcast, episode, action, timestamp?, guid?, ...{started,position,total}?
-                        println!("episodes GET for {username_format} since {query:?}");
-
-                        let (_username, format) = match username_format.split_once('.') {
-                            Some(tup) => tup,
-                            None => return warp::reply::with_status(
-                                warp::reply(),
-                                warp::http::StatusCode::BAD_REQUEST
-                            ).into_response(),
-                        };
-
-                        if format != "json" {
-                            return warp::reply::with_status(
-                                warp::reply(),
-                                warp::http::StatusCode::UNPROCESSABLE_ENTITY,
-                                ).into_response();
-                        }
-
-                        // let query = query_as!(
-                        //     EpisodeChangeRaw,
-                        //     r#"
-                        //     SELECT podcast, episode, timestamp, guid, action, started, position, total
-                        //     FROM episodes
-                        //     WHERE username = ?
-                        //     "#,
-                        //     username,
-                        // )
-                        //     .fetch_all(&*db)
-                        //     .await;
-
-                        warp::reply::json(&EpisodeChanges::empty_at(0)).into_response()
+                        map_into_json(podsync.episodes(username_format, query).await)
                     }
                 }
             });
@@ -285,115 +143,11 @@ async fn main() {
             .and(warp::post())
             .and(warp::body::json())
             .then({
-                let db = Arc::clone(&db);
+                let podsync = Arc::clone(&podsync);
                 move |username_format: String, body: Vec<EpisodeChangeWithDevice>| {
-                    let db = Arc::clone(&db);
-
+                    let podsync = Arc::clone(&podsync);
                     async move {
-                        // podcast, episode, guid: optional
-                        println!("episodes POST for {username_format}");
-
-                        let (username, format) = match username_format.split_once('.') {
-                            Some(tup) => tup,
-                            None => return warp::reply::with_status(
-                                warp::reply(),
-                                warp::http::StatusCode::BAD_REQUEST
-                            ).into_response(),
-                        };
-
-                        if format != "json" {
-                            return warp::reply::with_status(
-                                warp::reply(),
-                                warp::http::StatusCode::UNPROCESSABLE_ENTITY,
-                                ).into_response();
-                        }
-
-                        let mut tx = match db.begin().await {
-                            Ok(tx) => tx,
-                            Err(e) => {
-                                error!("transaction begin: {:?}", e);
-
-                                return warp::reply::with_status(
-                                    warp::reply(),
-                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                    ).into_response()
-                            }
-                        };
-
-                        for EpisodeChangeWithDevice { change, device } in body {
-                            println!("updating: {change:?} device={device}");
-
-                            let EpisodeChangeRaw {
-                                podcast, episode, timestamp, guid,
-                                action, started, position, total,
-                            } = change.into();
-
-                            let query = query!(
-                                "
-                                INSERT INTO episodes
-                                (
-                                    username, device, podcast,
-                                    episode, timestamp, guid,
-                                    action,
-                                    started, position, total
-                                )
-                                VALUES
-                                (
-                                    ?, ?, ?,
-                                    ?, ?, ?,
-                                    ?,
-                                    ?, ?, ?
-                                )
-                                ON CONFLICT (username, device, podcast, episode)
-                                DO
-                                    UPDATE SET
-                                        timestamp = ?,
-                                        guid = ?,
-                                        action = ?,
-                                        started = ?,
-                                        position = ?,
-                                        total = ?
-                                ",
-                                username, device, podcast,
-                                episode, timestamp, guid,
-                                action,
-                                started, position, total,
-                                //
-                                timestamp, guid,
-                                action,
-                                started, position, total
-                            )
-                                .execute(&mut tx)
-                                .await;
-
-                            if let Err(e) = query {
-                                error!("transaction addition: {:?}", e);
-
-                                return warp::reply::with_status(
-                                    warp::reply(),
-                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                ).into_response();
-                            }
-                        }
-
-                        match tx.commit().await {
-                            Ok(()) => {
-                                warp::reply::json(
-                                    &UpdatedUrls { // FIXME: rename struct
-                                        timestamp: 0, // FIXME: timestamping
-                                        update_urls: vec![], // unused by client
-                                    }
-                                ).into_response()
-                            }
-                            Err(e) => {
-                                error!("transaction commit: {:?}", e);
-
-                                warp::reply::with_status(
-                                    warp::reply(),
-                                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-                                ).into_response()
-                            }
-                        }
+                        map_into_json(podsync.update_episodes(username_format, body).await)
                     }
                 }
             });
@@ -412,12 +166,8 @@ async fn main() {
         .await;
 }
 
-async fn map_err_into_status<CB, F>(cb: CB) -> impl warp::Reply
-where
-    CB: FnOnce() -> F,
-    F: Future<Output = Result<(), warp::http::StatusCode>>,
-{
-    let status = match cb().await {
+fn map_into_status(result: Result<(), warp::http::StatusCode>) -> impl warp::Reply {
+    let status = match result {
         Ok(()) => warp::http::StatusCode::OK,
         Err(status) => status,
     };
@@ -425,13 +175,20 @@ where
     warp::reply::with_status(warp::reply(), status)
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct QuerySince {
-    since: u32,
+fn map_into_json<S>(result: Result<S, warp::http::StatusCode>) -> impl warp::Reply
+where
+    S: Serialize,
+{
+    match result {
+        Ok(s) => warp::reply::json(&s)
+            .into_response(),
+
+        Err(status) => warp::reply::with_status(warp::reply(), status)
+            .into_response()
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct UpdatedUrls {
-    timestamp: u32,
-    update_urls: Vec<[String; 2]>,
+pub struct QuerySince {
+    since: u32,
 }

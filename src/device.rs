@@ -25,9 +25,18 @@ pub struct DeviceCreate { // FIXME: allow "" to deserialise to this
 #[derive(Debug, Deserialize, Serialize, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceType {
+    Desktop,
+    Laptop,
     Mobile,
-    Unknown,
+    Server,
+    // #[serde(with = "null_type")] TODO
+    Other, // aka null
 }
+
+// mod null_type {
+//     deserialize
+//     serialize
+// }
 
 impl TryFrom<&'_ str> for DeviceType {
     type Error = ();

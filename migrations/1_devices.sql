@@ -1,5 +1,5 @@
+-- TODO: unique?
 CREATE TABLE IF NOT EXISTS devices (
-	id INTEGER NOT NULL PRIMARY KEY,
 	caption TEXT NOT NULL,
 	username TEXT NOT NULL,
 	type TEXT NOT NULL,
