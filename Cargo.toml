@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-warp = "0.3"
+tokio = { version = "1.26.0", features = ["full"] }
+serde = { version = "1.0.152", features = ["derive"] }
+warp = "0.3.3"
 # bytes = "1.1.0"
 tracing = "0.1.37"
 tracing-subscriber = "0.3.16"
