@@ -1,10 +1,13 @@
 use std::future::Future;
 
 use sqlx::{Pool, Sqlite, Transaction, query, query_as};
-use warp::http::StatusCode;
+use warp::http;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
+use crate::auth::Credentials;
+use crate::user::User;
+use crate::split_format_json;
 use crate::QuerySince;
 use crate::device::{Device, DeviceCreate, DeviceType};
 use crate::subscription::SubscriptionChanges;
@@ -15,6 +18,29 @@ use crate::episode::{
 };
 
 pub struct PodSync(Pool<Sqlite>);
+
+pub struct PodSyncAuthed<'s> {
+    sync: &'s PodSync,
+    user: &'s str,
+}
+
+pub enum Error {
+    Internal,
+    Unauthorized,
+    BadRequest,
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+impl Into<http::StatusCode> for Error {
+    fn into(self) -> http::StatusCode {
+        match self {
+            Self::Internal => http::StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Unauthorized => http::StatusCode::UNAUTHORIZED,
+            Self::BadRequest => http::StatusCode::BAD_REQUEST,
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdatedUrls {
@@ -27,48 +53,81 @@ impl PodSync {
         Self(db)
     }
 
-    pub async fn login(&self, username: String, auth: String)
-        -> Result<(), StatusCode>
-    {
-        eprintln!("todo: auth or {username}: {auth}");
+    pub async fn authenticate<'s>(
+        &'s self, creds: &'s Credentials,
+    ) -> Result<PodSyncAuthed<'s>> {
+        let username = creds.user();
 
+        let user = query_as!(
+                User,
+                r#"
+                SELECT *
+                FROM users
+                WHERE username = ?
+                "#,
+                username,
+        )
+                .fetch_one(&self.0)
+                .await
+                .map_err(|e| {
+                    if matches!(e, sqlx::Error::RowNotFound) {
+                        error!("rejecting non-existant user {}", creds.user());
+                    } else {
+                        error!("couldn't authenticate user {}: {e:?}", creds.user());
+                    }
+                    Error::Unauthorized
+                })?;
+
+        user.accept_password(creds.pass())
+            .then_some(())
+            .ok_or_else(|| {
+                error!("wrong password for user {}", creds.user());
+                Error::Unauthorized
+            })
+            .map(|()| PodSyncAuthed {
+                sync: self,
+                user: &creds.user(),
+            })
+    }
+}
+
+impl PodSyncAuthed<'_> {
+    pub async fn login(&self) -> Result<()> {
         Ok(())
     }
 
-    pub async fn devices(&self, username_format: String)
-        -> Result<Vec<Device>, StatusCode>
-    {
-        let (username, format) = split_dot(&username_format)?;
-        err_unless_json(format)?;
+    pub async fn devices(&self, username_format: String) -> Result<Vec<Device>> {
+        let username = split_format_json(&username_format)?;
 
+        // TODO
         let result = query_as!(
                 Device,
                 r#"
-                SELECT id, caption, type as "type: _", subscriptions, username
+                SELECT caption, type as "type: _", subscriptions, username
                 FROM devices
                 WHERE username = ?
                 "#,
                 username,
         )
-                .fetch_all(&self.0)
+                .fetch_all(&self.sync.0)
                 .await;
 
         match result {
             Ok(devices) => Ok(devices),
             Err(e) => {
                 error!("error selecting devices: {:?}", e);
-                Err(StatusCode::INTERNAL_SERVER_ERROR)
+                Err(Error::Internal)
             }
         }
     }
 
     pub async fn create_device(
         &self,
-        username: String,
         device_name: String,
         new_device: DeviceCreate
-    ) -> Result<(), StatusCode>
+    ) -> Result<()>
     {
+        let username = self.user;
         println!("got device creation {device_name} for {username}: {new_device:?}");
 
         let caption = new_device.caption.as_deref().unwrap_or("");
@@ -84,7 +143,7 @@ impl PodSync {
             username,
             0,
         )
-            .execute(&self.0)
+            .execute(&self.sync.0)
             .await;
 
         match result {
@@ -93,30 +152,30 @@ impl PodSync {
                 // FIXME: handle EEXIST (and others?)
                 error!("error inserting device: {:?}", e);
 
-                Err(StatusCode::INTERNAL_SERVER_ERROR)
+                Err(Error::Internal)
             }
         }
     }
 
-    pub async fn subscriptions(&self, _username: String, _deviceid_format: String)
-        -> Result<SubscriptionChanges, StatusCode>
+    pub async fn subscriptions(&self, _device_id: &str)
+        -> Result<SubscriptionChanges>
     {
-        // println!("got subscriptions for {deviceid_format} for {username}");
+        // println!("got subscriptions for {device_id} for {username}");
 
         Ok(SubscriptionChanges::empty())
     }
 
-    async fn transact<'t, T, R, F>(&self, transaction: T) -> Result<R, StatusCode>
+    async fn transact<'t, T, R, F>(&self, transaction: T) -> Result<R>
     where
         T: FnOnce(Transaction<'t, Sqlite>) -> F,
-        F: Future<Output = Result<(Transaction<'t, Sqlite>, R), StatusCode>>,
+        F: Future<Output = Result<(Transaction<'t, Sqlite>, R)>>,
     {
-        let tx = self.0
+        let tx = self.sync.0
             .begin()
             .await
             .map_err(|e| {
                 error!("error beginning transaction: {:?}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
+                Error::Internal
             })?;
 
         let (tx, r) = transaction(tx).await?;
@@ -125,7 +184,7 @@ impl PodSync {
             .await
             .map_err(|e| {
                 error!("error committing transaction: {:?}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
+                Error::Internal
             })?;
 
         Ok(r)
@@ -133,12 +192,10 @@ impl PodSync {
 
     pub async fn update_subscriptions(
         &self,
-        username: String,
-        deviceid_format: String,
+        device_id: String,
         changes: SubscriptionChanges
-    ) -> Result<UpdatedUrls, StatusCode> {
-        let (device_id, format) = split_dot(&deviceid_format)?;
-        err_unless_json(format)?;
+    ) -> Result<UpdatedUrls> {
+        let username = self.user;
 
         println!("got urls for {username}'s device {device_id}, timestamp {:?}:", changes.timestamp);
 
@@ -159,7 +216,7 @@ impl PodSync {
                     .await
                     .map_err(|e| {
                         error!("error querying mid-transaction: {:?}", e);
-                        StatusCode::INTERNAL_SERVER_ERROR
+                        Error::Internal
                     })?;
             }
 
@@ -181,7 +238,7 @@ impl PodSync {
                     .await
                     .map_err(|e| {
                         error!("error querying mid-transaction: {:?}", e);
-                        StatusCode::INTERNAL_SERVER_ERROR
+                        Error::Internal
                     })?;
             }
 
@@ -194,14 +251,11 @@ impl PodSync {
         })
     }
 
-    pub async fn episodes(&self, username_format: String, query: QuerySince)
-        -> Result<EpisodeChanges, StatusCode>
+    pub async fn episodes(&self, query: QuerySince)
+        -> Result<EpisodeChanges>
     {
-        let (_username, format) = split_dot(&username_format)?;
-        err_unless_json(format)?;
-
         // podcast, episode, action, timestamp?, guid?, ...{started,position,total}?
-        println!("episodes GET for {username_format} since {query:?}");
+        println!("episodes GET for {} since {query:?}", self.user);
 
         // TODO
         // let result = query_as!(
@@ -219,14 +273,13 @@ impl PodSync {
         Ok(EpisodeChanges::empty_at(0))
     }
 
-    pub async fn update_episodes(&self, username_format: String, body: Vec<EpisodeChangeWithDevice>)
-        -> Result<UpdatedUrls, StatusCode>
+    pub async fn update_episodes(&self, body: Vec<EpisodeChangeWithDevice>)
+        -> Result<UpdatedUrls>
     {
         // podcast, episode, guid: optional
-        println!("episodes POST for {username_format}");
+        println!("episodes POST for {}", self.user);
 
-        let (username, format) = split_dot(&username_format)?;
-        err_unless_json(format)?;
+        let username = self.user;
 
         self.transact(|mut tx| async move {
             for EpisodeChangeWithDevice { change, device } in body {
@@ -276,7 +329,7 @@ impl PodSync {
                     .await
                     .map_err(|e| {
                         error!("error querying mid-transaction: {:?}", e);
-                        StatusCode::INTERNAL_SERVER_ERROR
+                        Error::Internal
                     })?;
             }
 
@@ -288,14 +341,4 @@ impl PodSync {
             update_urls: vec![], // unused by client
         })
     }
-}
-
-fn split_dot(s: &str) -> Result<(&str, &str), StatusCode> {
-    s.split_once('.').ok_or(StatusCode::BAD_REQUEST)
-}
-
-fn err_unless_json(s: &str) -> Result<(), StatusCode> {
-    (s == "json")
-        .then_some(())
-        .ok_or(StatusCode::UNPROCESSABLE_ENTITY)
 }

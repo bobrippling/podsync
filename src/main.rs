@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    future::Future,
+};
 
 use warp::{Filter, Reply};
 use serde::{Deserialize, Serialize};
@@ -7,6 +10,11 @@ use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
+
+mod auth;
+use auth::Auth;
+
+mod user;
 
 mod device;
 
@@ -18,6 +26,9 @@ use episode::EpisodeChangeWithDevice;
 
 mod podsync;
 use podsync::PodSync;
+
+mod path_format;
+use path_format::split_format_json;
 
 static DB_URL: &str = "sqlite://pod.sql";
 
@@ -53,42 +64,64 @@ async fn main() {
 
     let podsync = Arc::new(PodSync::new(db));
 
-    let login = warp::path!("api" / "2" / "auth" / String / "login.json")
-        .and(warp::post())
+    let login =
+        warp::post()
+        .and(warp::path!("api" / "2" / "auth" / String / "login.json"))
         .and(warp::header("authorization"))
         .then({
             let podsync = Arc::clone(&podsync);
-            move |username: String, auth: String| {
+            move |username: String, auth: Auth| {
                 let podsync = Arc::clone(&podsync);
-                async move {
-                    map_into_status(podsync.login(username, auth).await)
-                }
+
+                result_to_response(async move {
+                    let credentials = auth.with_user(username)?;
+
+                    podsync.authenticate(&credentials)
+                        .await?
+                        .login()
+                        .await
+                })
             }
         });
 
     let devices = {
         let for_user = warp::path!("api" / "2" / "devices" / String)
             .and(warp::get())
+            .and(warp::header("authorization"))
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username_format: String| {
+                move |username_format: String, auth: Auth| {
                     let podsync = Arc::clone(&podsync);
-                    async move {
-                        map_into_json(podsync.devices(username_format).await)
-                    }
+
+                    result_to_response(async move {
+                        let username = split_format_json(&username_format)?;
+                        let credentials = auth.with_user(username.to_string())?;
+
+                        podsync.authenticate(&credentials)
+                            .await?
+                            .devices(username_format)
+                            .await
+                    })
                 }
             });
 
         let create = warp::path!("api" / "2" / "devices" / String / String)
             .and(warp::post())
+            .and(warp::header("authorization"))
             .and(warp::body::json()) // TODO: this may just be an empty string
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username, device_name, device| {
+                move |username, device_name, auth: Auth, device| {
                     let podsync = Arc::clone(&podsync);
-                    async move {
-                        map_into_status(podsync.create_device(username, device_name, device).await)
-                    }
+
+                    result_to_response(async move {
+                        let credentials = auth.with_user(username)?;
+
+                        podsync.authenticate(&credentials)
+                            .await?
+                            .create_device(device_name, device)
+                            .await
+                    })
                 }
             });
 
@@ -96,29 +129,45 @@ async fn main() {
     };
 
     let subscriptions = {
-        let get = warp::path!("api" / "2" / "subscriptions" / String / String) // FIXME: merge this
-                                                                               // with the below path (same for /episodes)
+        let get = warp::path!("api" / "2" / "subscriptions" / String / String)
+            // FIXME: merge this ^
+            // with the below path (same for /episodes)
             .and(warp::get())
+            .and(warp::header("authorization"))
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username, deviceid_format| {
+                move |username, deviceid_format: String, auth: Auth| {
                     let podsync = Arc::clone(&podsync);
-                    async move {
-                        map_into_json(podsync.subscriptions(username, deviceid_format).await)
-                    }
+
+                    result_to_response(async move {
+                        let device_id = split_format_json(&deviceid_format)?;
+                        let credentials = auth.with_user(username)?;
+
+                        podsync.authenticate(&credentials)
+                            .await?
+                            .subscriptions(device_id)
+                            .await
+                    })
                 }
             });
 
         let upload = warp::path!("api" / "2" / "subscriptions" / String / String)
             .and(warp::post())
+            .and(warp::header("authorization"))
             .and(warp::body::json())
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username, deviceid_format: String, changes: SubscriptionChanges| {
+                move |username, deviceid_format: String, auth: Auth, changes: SubscriptionChanges| {
                     let podsync = Arc::clone(&podsync);
-                    async move {
-                        map_into_json(podsync.update_subscriptions(username, deviceid_format, changes).await)
-                    }
+
+                    result_to_response(async move {
+                        let credentials = auth.with_user(username)?;
+
+                        podsync.authenticate(&credentials)
+                            .await?
+                            .update_subscriptions(deviceid_format, changes)
+                            .await
+                    })
                 }
             });
 
@@ -129,26 +178,42 @@ async fn main() {
         let get = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::get())
             .and(warp::query())
+            .and(warp::header("authorization"))
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username_format: String, query: QuerySince| {
+                move |username_format: String, query: QuerySince, auth: Auth| {
                     let podsync = Arc::clone(&podsync);
-                    async move {
-                        map_into_json(podsync.episodes(username_format, query).await)
-                    }
+
+                    result_to_response(async move {
+                        let username = split_format_json(&username_format)?;
+                        let credentials = auth.with_user(username.to_string())?;
+
+                        podsync.authenticate(&credentials)
+                            .await?
+                            .episodes(query)
+                            .await
+                    })
                 }
             });
 
         let upload = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::post())
+            .and(warp::header("authorization"))
             .and(warp::body::json())
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username_format: String, body: Vec<EpisodeChangeWithDevice>| {
+                move |username_format: String, auth: Auth, body: Vec<EpisodeChangeWithDevice>| {
                     let podsync = Arc::clone(&podsync);
-                    async move {
-                        map_into_json(podsync.update_episodes(username_format, body).await)
-                    }
+
+                    result_to_response(async move {
+                        let username = split_format_json(&username_format)?;
+                        let credentials = auth.with_user(username.to_string())?;
+
+                        podsync.authenticate(&credentials)
+                            .await?
+                            .update_episodes(body)
+                            .await
+                    })
                 }
             });
 
@@ -166,25 +231,16 @@ async fn main() {
         .await;
 }
 
-fn map_into_status(result: Result<(), warp::http::StatusCode>) -> impl warp::Reply {
-    let status = match result {
-        Ok(()) => warp::http::StatusCode::OK,
-        Err(status) => status,
-    };
-
-    warp::reply::with_status(warp::reply(), status)
-}
-
-fn map_into_json<S>(result: Result<S, warp::http::StatusCode>) -> impl warp::Reply
+async fn result_to_response<F, S>(f: F) -> impl warp::Reply
 where
+    F: Future<Output = podsync::Result<S>>,
     S: Serialize,
 {
-    match result {
+    match f.await {
         Ok(s) => warp::reply::json(&s)
             .into_response(),
-
-        Err(status) => warp::reply::with_status(warp::reply(), status)
-            .into_response()
+        Err(e) => warp::reply::with_status(warp::reply(), e.into())
+            .into_response(),
     }
 }
 

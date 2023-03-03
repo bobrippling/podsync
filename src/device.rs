@@ -4,7 +4,7 @@ use sqlx::FromRow;
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct Device {
-    pub id: i64, // FIXME: String, convert when pulling out of the DB? change the DB type?
+    // pub id: i64, // FIXME: String, convert when pulling out of the DB? change the DB type?
     pub caption: String,
 
     // #[sqlx(try_from = "String")]

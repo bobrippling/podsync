@@ -1,4 +1,5 @@
 -- TODO: unique?
+
 CREATE TABLE IF NOT EXISTS devices (
 	caption TEXT NOT NULL,
 	username TEXT NOT NULL,
