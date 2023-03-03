@@ -3,6 +3,11 @@ name = "podsync"
 version = "0.1.0"
 edition = "2021"
 
+description = "A server to sync podcasts with, mirroring the gpodder API. Designed for use with AntennaPod"
+license = "GPL-3.0-or-later"
+homepage = "https://github.com/bobrippling/podsync"
+repository = "https://github.com/bobrippling/podsync"
+
 [dependencies]
 tokio = { version = "1.26.0", features = ["full"] }
 serde = { version = "1.0.152", features = ["derive"] }
