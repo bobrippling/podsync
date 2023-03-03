@@ -6,8 +6,8 @@ sql(){
 
 sqlx database create --database-url sqlite://pod.sql
 
-ls migrations |
+find migrations |
 	sort -n |
 	while read f; do
-		!sqlite3 pod.sql <"$f"
+		sqlite3 pod.sql <"$f"
 	done
