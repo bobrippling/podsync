@@ -12,7 +12,7 @@ use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod auth;
-use auth::Auth;
+use auth::{Auth, WithUser};
 
 mod user;
 
@@ -67,10 +67,10 @@ async fn main() {
     let login =
         warp::post()
         .and(warp::path!("api" / "2" / "auth" / String / "login.json"))
-        .and(warp::header("authorization"))
+        .and(warp::header::optional("authorization"))
         .then({
             let podsync = Arc::clone(&podsync);
-            move |username: String, auth: Auth| {
+            move |username: String, auth: Option<Auth>| {
                 let podsync = Arc::clone(&podsync);
 
                 result_to_response(async move {
@@ -87,10 +87,10 @@ async fn main() {
     let devices = {
         let for_user = warp::path!("api" / "2" / "devices" / String)
             .and(warp::get())
-            .and(warp::header("authorization"))
+            .and(warp::header::optional("authorization"))
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username_format: String, auth: Auth| {
+                move |username_format: String, auth: Option<Auth>| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
@@ -107,11 +107,11 @@ async fn main() {
 
         let create = warp::path!("api" / "2" / "devices" / String / String)
             .and(warp::post())
-            .and(warp::header("authorization"))
+            .and(warp::header::optional("authorization"))
             .and(warp::body::json()) // TODO: this may just be an empty string
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username, device_name, auth: Auth, device| {
+                move |username, device_name, auth: Option<Auth>, device| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
@@ -133,10 +133,10 @@ async fn main() {
             // FIXME: merge this ^
             // with the below path (same for /episodes)
             .and(warp::get())
-            .and(warp::header("authorization"))
+            .and(warp::header::optional("authorization"))
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username, deviceid_format: String, auth: Auth| {
+                move |username, deviceid_format: String, auth: Option<Auth>| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
@@ -153,11 +153,11 @@ async fn main() {
 
         let upload = warp::path!("api" / "2" / "subscriptions" / String / String)
             .and(warp::post())
-            .and(warp::header("authorization"))
+            .and(warp::header::optional("authorization"))
             .and(warp::body::json())
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username, deviceid_format: String, auth: Auth, changes: SubscriptionChanges| {
+                move |username, deviceid_format: String, auth: Option<Auth>, changes: SubscriptionChanges| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
@@ -178,10 +178,10 @@ async fn main() {
         let get = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::get())
             .and(warp::query())
-            .and(warp::header("authorization"))
+            .and(warp::header::optional("authorization"))
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username_format: String, query: QuerySince, auth: Auth| {
+                move |username_format: String, query: QuerySince, auth: Option<Auth>| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
@@ -198,11 +198,11 @@ async fn main() {
 
         let upload = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::post())
-            .and(warp::header("authorization"))
+            .and(warp::header::optional("authorization"))
             .and(warp::body::json())
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username_format: String, auth: Auth, body: Vec<EpisodeChangeWithDevice>| {
+                move |username_format: String, auth: Option<Auth>, body: Vec<EpisodeChangeWithDevice>| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {

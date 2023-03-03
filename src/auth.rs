@@ -15,6 +15,10 @@ pub struct Credentials {
     pass: String,
 }
 
+pub trait WithUser: Sized {
+    fn with_user(self, username: String) -> podsync::Result<Credentials>;
+}
+
 impl FromStr for Auth {
     type Err = &'static str;
 
@@ -44,9 +48,9 @@ impl FromStr for Auth {
     }
 }
 
-impl Auth {
-    pub fn with_user(self, new_user: String) -> Result<Credentials, podsync::Error> {
-        let Self { user, pass } = self;
+impl WithUser for Option<Auth> {
+    fn with_user(self, new_user: String) -> podsync::Result<Credentials> {
+        let Auth { user, pass } = self.ok_or(podsync::Error::Unauthorized)?;
 
         if user == new_user {
             Ok(Credentials { user, pass })
