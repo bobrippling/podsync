@@ -3,7 +3,7 @@ use std::{
     future::Future,
 };
 
-use warp::{Filter, Reply};
+use warp::{Filter, Reply, http::header::{HeaderMap, HeaderValue}};
 use serde::{Deserialize, Serialize};
 
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
@@ -12,9 +12,10 @@ use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod auth;
-use auth::{Auth, WithUser};
+use auth::{BasicAuth, SessionId};
 
 mod user;
+use user::User;
 
 mod device;
 
@@ -31,6 +32,7 @@ mod path_format;
 use path_format::split_format_json;
 
 static DB_URL: &str = "sqlite://pod.sql";
+static COOKIE_NAME: &str = "sessionid"; // gpodder/mygpo, doc/api/reference/auth.rst:16
 
 #[tokio::main]
 async fn main() {
@@ -64,40 +66,90 @@ async fn main() {
 
     let podsync = Arc::new(PodSync::new(db));
 
-    let login =
-        warp::post()
-        .and(warp::path!("api" / "2" / "auth" / String / "login.json"))
-        .and(warp::header::optional("authorization"))
-        .then({
-            let podsync = Arc::clone(&podsync);
-            move |username: String, auth: Option<Auth>| {
+    let auth = {
+        let login =
+            warp::post()
+            .and(warp::path!("api" / "2" / "auth" / String / "login.json"))
+            .and(warp::header::optional("authorization"))
+            .and(warp::cookie::optional(COOKIE_NAME))
+            .then({
                 let podsync = Arc::clone(&podsync);
+                move |username: String, auth: Option<BasicAuth>, session_id: Option<String>| {
+                    let podsync = Arc::clone(&podsync);
 
-                result_to_response(async move {
-                    let credentials = auth.with_user(username)?;
+                    result_to_response(async move {
+                        let auth = match auth {
+                            Some(auth) => auth.with_path_username(&username),
+                            None => Err(podsync::Error::Unauthorized),
+                        }?;
 
-                    podsync.authenticate(&credentials)
-                        .await?
-                        .login()
-                        .await
-                })
+                        let maybe_session_id = session_id
+                            .as_deref()
+                            .map(SessionId::try_from)
+                            .transpose()
+                            .map_err(|()| podsync::Error::BadRequest)?;
+
+                        let podsync = podsync
+                            .login(&auth, maybe_session_id)
+                            .await?;
+                        let session_id = podsync.session_id();
+
+                        let headers = HeaderMap::new();
+                        headers.insert(
+                            COOKIE_NAME,
+                            HeaderValue::from_str(&session_id.to_string())
+                                .map_err(|_| podsync::Error::Internal)?,
+                        );
+
+                        Ok((
+                            (),
+                            headers,
+                        ))
+                    })
+                }
+            });
+
+        // TODO: logout (https://github.com/gpodder/mygpo/blob/HEAD/doc/api/reference/auth.rst)
+        //login.or(logout)
+        login
+    };
+
+    let auth_check = warp::cookie::<String>(COOKIE_NAME)
+        .then(|cookie| {
+            async move {
+                println!("got cookie: {cookie}");
+
+                // TODO: lookup user with session_id == {cookie} in DB and return some struct representing them
+                // User {
+                //     username: "uname_placeholder".to_string(),
+                //     pwhash: "ad08awd".to_string(),
+                // }
+                todo!()
             }
         });
 
     let devices = {
         let for_user = warp::path!("api" / "2" / "devices" / String)
             .and(warp::get())
-            .and(warp::header::optional("authorization"))
+            .and(auth_check)
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username_format: String, auth: Option<Auth>| {
+                move |username_format: String, user: User| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
                         let username = split_format_json(&username_format)?;
-                        let credentials = auth.with_user(username.to_string())?;
 
-                        podsync.authenticate(&credentials)
+                        if user.username != username {
+                            return Err(podsync::Error::Unauthorized);
+                        }
+
+                        // let credentials = Credentials { // user.with_user(username.to_string())?;
+                        //     user: "un".to_string(),
+                        //     pass: "pw".to_string(),
+                        // };
+
+                        podsync.authenticate(todo!())
                             .await?
                             .devices(username_format)
                             .await
@@ -105,13 +157,14 @@ async fn main() {
                 }
             });
 
+        /*
         let create = warp::path!("api" / "2" / "devices" / String / String)
             .and(warp::post())
-            .and(warp::header::optional("authorization"))
+            .and(auth_check)
             .and(warp::body::json()) // TODO: this may just be an empty string
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username, device_name, auth: Option<Auth>, device| {
+                move |username, device_name, auth: Option<BasicAuth>, device| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
@@ -126,17 +179,20 @@ async fn main() {
             });
 
         for_user.or(create)
+        */
+        for_user
     };
 
+    /*
     let subscriptions = {
         let get = warp::path!("api" / "2" / "subscriptions" / String / String)
             // FIXME: merge this ^
             // with the below path (same for /episodes)
             .and(warp::get())
-            .and(warp::header::optional("authorization"))
+            .and(auth_check)
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username, deviceid_format: String, auth: Option<Auth>| {
+                move |username, deviceid_format: String, auth: Option<BasicAuth>| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
@@ -153,11 +209,11 @@ async fn main() {
 
         let upload = warp::path!("api" / "2" / "subscriptions" / String / String)
             .and(warp::post())
-            .and(warp::header::optional("authorization"))
+            .and(auth_check)
             .and(warp::body::json())
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username, deviceid_format: String, auth: Option<Auth>, changes: SubscriptionChanges| {
+                move |username, deviceid_format: String, auth: Option<BasicAuth>, changes: SubscriptionChanges| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
@@ -178,15 +234,15 @@ async fn main() {
         let get = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::get())
             .and(warp::query())
-            .and(warp::header::optional("authorization"))
+            .and(auth_check)
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username_format: String, query: QuerySince, auth: Option<Auth>| {
+                move |username_format: String, query: QuerySince, user: User| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
                         let username = split_format_json(&username_format)?;
-                        let credentials = auth.with_user(username.to_string())?;
+                        let credentials = user.with_user(username.to_string())?;
 
                         podsync.authenticate(&credentials)
                             .await?
@@ -198,11 +254,11 @@ async fn main() {
 
         let upload = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::post())
-            .and(warp::header::optional("authorization"))
+            .and(auth_check)
             .and(warp::body::json())
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username_format: String, auth: Option<Auth>, body: Vec<EpisodeChangeWithDevice>| {
+                move |username_format: String, auth: Option<BasicAuth>, body: Vec<EpisodeChangeWithDevice>| {
                     let podsync = Arc::clone(&podsync);
 
                     result_to_response(async move {
@@ -219,12 +275,21 @@ async fn main() {
 
         get.or(upload)
     };
+    */
 
-    let routes = login
+    let log = warp::log::custom(|info| {
+        println!("request headers:");
+        for (key, value) in info.request_headers() {
+            println!("  {:?}: {:?}", key, value);
+        }
+    });
+
+    let routes = auth
         .or(devices)
-        .or(subscriptions)
-        .or(episodes)
-        .with(warp::trace::request());
+        // .or(subscriptions)
+        // .or(episodes)
+        .with(warp::trace::request())
+        .with(log);
 
     warp::serve(routes)
         .run(([0, 0, 0, 0], 8080))
@@ -233,14 +298,70 @@ async fn main() {
 
 async fn result_to_response<F, S>(f: F) -> impl warp::Reply
 where
+    F: Future<Output = podsync::Result<(S, HeaderMap)>>,
+    S: Serialize,
+{
+    match f.await {
+        Ok((s, headers)) => {
+            let max_age = 1209600;
+
+            // FIXME: iterate over headers
+
+            warp::reply::with_header(
+                warp::reply::json(&s),
+                "set-cookie",
+                format!(
+                    "{}={}; Path=/; HttpOnly; Max-Age={}",
+                    COOKIE_NAME,
+                    "MYCOOKIE",
+                    max_age,
+                ),
+            ).into_response()
+        }
+        Err(e) => {
+            if false && matches!(e, podsync::Error::Unauthorized) {
+                warp::reply::with_header(
+                    warp::reply::with_status(
+                        warp::reply(),
+                        e.into()
+                    ),
+                    "www-authenticate",
+                    "Basic realm=\"\""
+                )
+                    .into_response()
+            } else {
+                warp::reply::with_status(warp::reply(), e.into())
+                    .into_response()
+            }
+        }
+    }
+}
+
+async fn result_to_headers<F, S>(f: F) -> impl warp::Reply
+where
     F: Future<Output = podsync::Result<S>>,
     S: Serialize,
 {
     match f.await {
-        Ok(s) => warp::reply::json(&s)
-            .into_response(),
-        Err(e) => warp::reply::with_status(warp::reply(), e.into())
-            .into_response(),
+        Ok(s) => {
+            warp::reply::json(&s).into_response()
+        }
+        Err(e) => {
+            if false && matches!(e, podsync::Error::Unauthorized) {
+                warp::reply::with_header(
+                    warp::reply::with_status(
+                        warp::reply(),
+                        e.into()
+                    ),
+                    "www-authenticate",
+                    "Basic realm=\"\""
+                )
+                    .into_response()
+            } else {
+                warp::reply::with_status(warp::reply(), e.into())
+                    .into_response()
+            }
+        }
     }
 }
 

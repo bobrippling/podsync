@@ -4,8 +4,9 @@ use sqlx::{Pool, Sqlite, Transaction, query, query_as};
 use warp::http;
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use uuid::Uuid;
 
-use crate::auth::Credentials;
+use crate::auth::{AuthAttempt, SessionId};
 use crate::user::User;
 use crate::split_format_json;
 use crate::QuerySince;
@@ -21,7 +22,14 @@ pub struct PodSync(Pool<Sqlite>);
 
 pub struct PodSyncAuthed<'s> {
     sync: &'s PodSync,
+    session_id: SessionId,
     user: &'s str,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdatedUrls {
+    timestamp: u32,
+    update_urls: Vec<[String; 2]>,
 }
 
 pub enum Error {
@@ -42,58 +50,97 @@ impl Into<http::StatusCode> for Error {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct UpdatedUrls {
-    timestamp: u32,
-    update_urls: Vec<[String; 2]>,
-}
-
 impl PodSync {
     pub fn new(db: Pool<Sqlite>) -> Self {
         Self(db)
     }
 
-    pub async fn authenticate<'s>(
-        &'s self, creds: &'s Credentials,
+    pub async fn login<'s>(
+        &'s self,
+        auth_attempt: &'s AuthAttempt,
+        session_id: Option<SessionId>,
     ) -> Result<PodSyncAuthed<'s>> {
-        let username = creds.user();
+        let username = auth_attempt.user();
 
         let user = query_as!(
                 User,
-                r#"
+                "
                 SELECT *
                 FROM users
                 WHERE username = ?
-                "#,
+                ",
                 username,
         )
                 .fetch_one(&self.0)
                 .await
                 .map_err(|e| {
                     if matches!(e, sqlx::Error::RowNotFound) {
-                        error!("rejecting non-existant user {}", creds.user());
+                        error!("rejecting non-existant user {}", username);
+                        Error::Unauthorized
                     } else {
-                        error!("couldn't authenticate user {}: {e:?}", creds.user());
+                        error!("couldn't authenticate user {}: {e:?}", username);
+                        Error::Internal
                     }
-                    Error::Unauthorized
                 })?;
 
-        user.accept_password(creds.pass())
-            .then_some(())
-            .ok_or_else(|| {
-                error!("wrong password for user {}", creds.user());
-                Error::Unauthorized
-            })
-            .map(|()| PodSyncAuthed {
-                sync: self,
-                user: &creds.user(),
-            })
+        if auth_attempt.calc_pwhash() != user.pwhash {
+            error!("wrong password for user {}", username);
+            return Err(Error::Unauthorized);
+        }
+
+        let new_session = || async {
+            let session_id = Uuid::new_v4();
+            let str = session_id.as_simple().to_string();
+
+            query!(
+                "
+                UPDATE users
+                SET session_id = ?
+                WHERE username = ?
+                ",
+                str,
+                username,
+            )
+                .execute(&self.0)
+                .await
+                .map_err(|e| {
+                    error!("couldn't login user {}: {e:?}", username);
+                    Error::Internal
+                })?;
+
+            Ok(SessionId::from(session_id))
+        };
+
+        match (session_id, user.session_id) {
+            (None, None) => {
+                // initial login
+                let session_id = new_session().await?;
+                Ok(PodSyncAuthed {
+                    sync: self,
+                    session_id,
+                    user: auth_attempt.user(),
+                })
+            }
+            (Some(client), Some(real)) => {
+                // checking their token still works
+                Err(Error::Internal) // TODO
+            }
+            (Some(_), None) => {
+                // logged out but somehow kept their token?
+                Err(Error::Internal) // TODO
+            }
+            (None, Some(real)) => {
+                // logging in again, client's forgot their token
+                Err(Error::Internal) // TODO
+            }
+        }
+
     }
 }
 
 impl PodSyncAuthed<'_> {
-    pub async fn login(&self) -> Result<()> {
-        Ok(())
+    pub fn session_id(&self) -> SessionId {
+        self.session_id
     }
 
     pub async fn devices(&self, username_format: String) -> Result<Vec<Device>> {

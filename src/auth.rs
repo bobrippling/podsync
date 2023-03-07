@@ -1,25 +1,48 @@
 use std::str::FromStr;
 
+use sha256::digest;
 use base64_light::base64_decode;
 use tracing::error;
+use uuid::Uuid;
 
 use crate::podsync;
 
-pub struct Auth {
+pub struct BasicAuth {
     user: String,
     pass: String,
 }
 
-pub struct Credentials {
-    user: String,
-    pass: String,
+pub struct AuthAttempt {
+    auth: BasicAuth,
 }
 
-pub trait WithUser: Sized {
-    fn with_user(self, username: String) -> podsync::Result<Credentials>;
+pub struct SessionId(Uuid);
+
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_simple().fmt(f)
+    }
 }
 
-impl FromStr for Auth {
+impl BasicAuth {
+    pub fn with_path_username(self, username: &str) -> podsync::Result<AuthAttempt> {
+        (self.user == username)
+            .then(|| AuthAttempt { auth: self })
+            .ok_or(podsync::Error::Unauthorized)
+    }
+}
+
+impl AuthAttempt {
+    pub fn user(&self) -> &str {
+        &self.auth.user
+    }
+
+    pub fn calc_pwhash(&self) -> String {
+        digest(self.auth.pass)
+    }
+}
+
+impl FromStr for BasicAuth {
     type Err = &'static str;
 
     fn from_str(header: &str) -> Result<Self, Self::Err> {
@@ -48,19 +71,16 @@ impl FromStr for Auth {
     }
 }
 
-impl WithUser for Option<Auth> {
-    fn with_user(self, new_user: String) -> podsync::Result<Credentials> {
-        let Auth { user, pass } = self.ok_or(podsync::Error::Unauthorized)?;
+impl TryFrom<&str> for SessionId {
+    type Error = ();
 
-        if user == new_user {
-            Ok(Credentials { user, pass })
-        } else {
-            Err(podsync::Error::Unauthorized)
-        }
+    fn try_from(s: &str) -> Result<Self, ()> {
+        Uuid::try_from(s).map(Self).map_err(|_| ())
     }
 }
 
-impl Credentials {
-    pub fn user(&self) -> &str { &self.user }
-    pub fn pass(&self) -> &str { &self.pass }
+impl From<Uuid> for SessionId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
 }
