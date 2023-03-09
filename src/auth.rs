@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use sha256::digest;
 use base64_light::base64_decode;
-use tracing::error;
+use log::error;
 use uuid::Uuid;
 
 use crate::podsync;

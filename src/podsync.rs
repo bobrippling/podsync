@@ -7,7 +7,7 @@ use std::{
 use sqlx::{Pool, Sqlite, Transaction, query, query_as};
 use warp::http;
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use log::{error, trace};
 
 use crate::auth::{AuthAttempt, SessionId};
 use crate::user::User;
@@ -133,21 +133,26 @@ impl PodSync {
                         Error::Internal
                     })?;
 
+                trace!("new session created");
                 ok(session_id)
             }
             (Some(client), Some(db_id)) => {
                 if client == db_id {
+                    trace!("session check passed");
                     ok(client)
                 } else {
+                    trace!("session check failed");
                     Err(Error::Internal)
                 }
             }
             (Some(_), None) => {
                 // logged out but somehow kept their token?
+                trace!("no session in db");
                 Err(Error::Internal)
             }
             (None, Some(db_id)) => {
                 // logging in again, client's forgot their token
+                trace!("fresh login");
                 ok(db_id)
             }
         }

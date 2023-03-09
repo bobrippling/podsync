@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 
-use tracing::{Level, info};
-use tracing_subscriber::FmtSubscriber;
+use log::info;
 
 mod auth;
 use auth::{BasicAuth, SessionId};
@@ -40,17 +39,13 @@ static COOKIE_NAME: &str = "sessionid"; // gpodder/mygpo, doc/api/reference/auth
 
 #[tokio::main]
 async fn main() {
+    pretty_env_logger::init();
+
     let args = <Args as clap::Parser>::parse();
-
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
-        .finish();
-
-    tracing::subscriber::set_global_default(subscriber).unwrap();
 
     match Sqlite::create_database(DB_URL).await {
         Ok(()) => {
-            info!("Created database {}", DB_URL);
+            info!("Using {}", DB_URL);
         }
         Err(e) => {
             let sqlx::Error::Database(db_err) = e else {
@@ -231,7 +226,7 @@ async fn main() {
         .or(devices)
         .or(subscriptions)
         .or(episodes)
-        .with(warp::trace::request());
+        .with(warp::log("podsync::warp"));
 
     warp::serve(routes)
         .run(args.addr())
