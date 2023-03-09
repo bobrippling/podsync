@@ -159,7 +159,7 @@ async fn main() {
             .then(move |username: String, device_name, podsync: PodSyncAuthed, device| {
                 result_to_json(async move {
                     podsync.with_user(&username)?
-                        .create_device(device_name, device)
+                        .update_device(device_name, device)
                         .await
                 })
             });

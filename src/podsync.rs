@@ -12,7 +12,7 @@ use log::{error, trace};
 use crate::auth::{AuthAttempt, SessionId};
 use crate::user::User;
 use crate::QuerySince;
-use crate::device::{Device, DeviceCreate, DeviceType};
+use crate::device::{Device, DeviceUpdate, DeviceType};
 use crate::subscription::SubscriptionChanges;
 use crate::episode::{
     EpisodeChanges,
@@ -268,17 +268,19 @@ impl PodSyncAuthed<true> {
         }
     }
 
-    pub async fn create_device(
+    pub async fn update_device(
         &self,
         device_name: String,
-        new_device: DeviceCreate
+        new_device: DeviceUpdate
     ) -> Result<()>
     {
         let username = &self.username;
-        println!("got device creation {device_name} for {username}: {new_device:?}");
+        trace!("{username} updating device {device_name}: {new_device:?}");
 
         let caption = new_device.caption.as_deref().unwrap_or("");
         let r#type = new_device.r#type.unwrap_or(DeviceType::Other);
+
+        // FIXME: update only values that've been provided
 
         let result = query!(
             "INSERT INTO devices

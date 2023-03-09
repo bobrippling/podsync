@@ -16,8 +16,8 @@ pub struct Device {
     pub username: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)] // FIXME: drop Serialize
-pub struct DeviceCreate { // FIXME: allow "" to deserialise to this
+#[derive(Debug, Deserialize)]
+pub struct DeviceUpdate { // FIXME: allow "" to deserialise to this
     pub caption: Option<String>,
     pub r#type: Option<DeviceType>,
 }
