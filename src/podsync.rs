@@ -148,7 +148,7 @@ impl PodSync {
             (Some(_), None) => {
                 // logged out but somehow kept their token?
                 trace!("no session in db");
-                Err(Error::Internal)
+                Err(Error::Unauthorized)
             }
             (None, Some(db_id)) => {
                 // logging in again, client's forgot their token
