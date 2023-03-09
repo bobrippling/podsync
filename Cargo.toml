@@ -11,7 +11,7 @@ repository = "https://github.com/bobrippling/podsync"
 [dependencies]
 tokio = { version = "1.26.0", features = ["full"] }
 serde = { version = "1.0.152", features = ["derive"] }
-time = { version = "0.3.20", features = ["serde", "formatting", "parsing", "macros"] }
+time = { version = "0.3.20", features = ["serde", "formatting", "parsing", "macros", "local-offset"] }
 clap = { version = "4.1.8", features = ["derive"] }
 
 log = "0.4.17"

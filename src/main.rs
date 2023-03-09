@@ -3,7 +3,7 @@ use std::{
     future::Future,
 };
 
-use time::ext::NumericalDuration;
+use time::{OffsetDateTime, ext::NumericalDuration};
 use warp::{Filter, Reply, http::{self, header::{HeaderMap, HeaderValue}}, hyper::Body};
 use cookie::{Cookie, SameSite};
 use serde::{Deserialize, Serialize};
@@ -226,7 +226,40 @@ async fn main() {
         .or(devices)
         .or(subscriptions)
         .or(episodes)
-        .with(warp::log("podsync::warp"));
+        .with(warp::log::custom(|info| {
+            use std::fmt::*;
+            use time::format_description::well_known::Rfc3339;
+
+            struct OptFmt<T>(Option<T>);
+
+            impl<T: Display> Display for OptFmt<T> {
+                fn fmt(&self, fmt: &mut Formatter<'_>) -> Result {
+                    match self.0 {
+                        Some(ref x) => x.fmt(fmt),
+                        None => write!(fmt, "-"),
+                    }
+                }
+            }
+
+            let now = match OffsetDateTime::now_local() {
+                Ok(now) => now.format(&Rfc3339).ok(),
+                Err(_) => None,
+            };
+
+            info!(
+                target: "podsync::warp",
+                "{} {} \"{} {} {:?}\" {} \"{}\" \"{}\" {:?}",
+                OptFmt(info.remote_addr()),
+                OptFmt(now),
+                info.method(),
+                info.path(),
+                info.version(),
+                info.status().as_u16(),
+                OptFmt(info.referer()),
+                OptFmt(info.user_agent()),
+                info.elapsed(),
+            );
+        }));
 
     warp::serve(routes)
         .run(args.addr())
