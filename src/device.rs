@@ -10,10 +10,16 @@ pub struct Device {
     // #[sqlx(try_from = "String")]
     pub r#type: DeviceType,
 
-    pub subscriptions: i64,
-
-    #[serde(skip)]
+    #[serde(skip)] // FIXME
     pub username: String,
+}
+
+#[derive(Debug, sqlx::Type, Serialize)]
+pub struct DeviceAndSub {
+    pub id: String,
+    pub caption: String,
+    pub r#type: DeviceType,
+    pub subscriptions: u32,
 }
 
 #[derive(Debug, Deserialize)]

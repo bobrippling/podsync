@@ -12,7 +12,7 @@ use log::{error, trace};
 use crate::auth::{AuthAttempt, SessionId};
 use crate::user::User;
 use crate::QuerySince;
-use crate::device::{Device, DeviceUpdate, DeviceType};
+use crate::device::{DeviceAndSub, DeviceUpdate, DeviceType};
 use crate::subscription::SubscriptionChanges;
 use crate::episode::{
     EpisodeChanges,
@@ -244,28 +244,27 @@ impl PodSyncAuthed<true> {
                 })
     }
 
-    pub async fn devices(&self) -> Result<Vec<Device>> {
+    pub async fn devices(&self) -> Result<Vec<DeviceAndSub>> {
         let username = &self.username;
 
-        let result = query_as!(
-                Device,
-                r#"
-                SELECT caption, type as "type: _", subscriptions, username
-                FROM devices
-                WHERE username = ?
-                "#,
-                username,
+        query_as!(
+            DeviceAndSub,
+            r#"
+            SELECT id, caption, type as "type: _", COUNT(*) as "subscriptions!: _"
+            FROM devices
+            INNER JOIN subscriptions
+                ON devices.username = subscriptions.username
+            GROUP BY devices.username
+            HAVING devices.username = ?
+            "#,
+            username,
         )
-                .fetch_all(&self.sync.0)
-                .await;
-
-        match result {
-            Ok(devices) => Ok(devices),
-            Err(e) => {
+            .fetch_all(&self.sync.0)
+            .await
+            .map_err(|e| {
                 error!("error selecting devices: {:?}", e);
-                Err(Error::Internal)
-            }
-        }
+                Error::Internal
+            })
     }
 
     pub async fn update_device(
@@ -284,13 +283,12 @@ impl PodSyncAuthed<true> {
 
         let result = query!(
             "INSERT INTO devices
-            (caption, type, username, subscriptions)
+            (caption, type, username)
             VALUES
-            (?, ?, ?, ?)",
+            (?, ?, ?)",
             caption,
             r#type,
             username,
-            0,
         )
             .execute(&self.sync.0)
             .await;
