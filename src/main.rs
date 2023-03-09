@@ -272,26 +272,18 @@ where
     B: Serialize,
 {
     match f.await {
-        Ok(body) => {
-            warp::reply::json(&body)
-                .into_response()
-        }
-        Err(e) => {
-            if false && matches!(e, podsync::Error::Unauthorized) {
-                warp::reply::with_header(
-                    warp::reply::with_status(
-                        warp::reply(),
-                        e.into()
-                    ),
-                    "www-authenticate",
-                    "Basic realm=\"\""
-                )
-                    .into_response()
-            } else {
-                warp::reply::with_status(warp::reply(), e.into())
-                    .into_response()
-            }
-        }
+        Ok(body) => warp::reply::json(&body).into_response(),
+        Err(e) => err_to_warp(e).into_response(),
+    }
+}
+
+async fn result_to_ok<F>(f: F) -> impl warp::Reply
+where
+    F: Future<Output = podsync::Result<()>>,
+{
+    match f.await {
+        Ok(()) => warp::reply().into_response(),
+        Err(e) => err_to_warp(e).into_response(),
     }
 }
 
@@ -316,23 +308,12 @@ where
 
             resp.body(Body::empty()).unwrap()
         }
-        Err(e) => {
-            if false && matches!(e, podsync::Error::Unauthorized) {
-                warp::reply::with_header(
-                    warp::reply::with_status(
-                        warp::reply(),
-                        e.into()
-                    ),
-                    "www-authenticate",
-                    "Basic realm=\"\""
-                )
-                    .into_response()
-            } else {
-                warp::reply::with_status(warp::reply(), e.into())
-                    .into_response()
-            }
-        }
+        Err(e) => err_to_warp(e).into_response(),
     }
+}
+
+fn err_to_warp(e: podsync::Error) -> impl warp::Reply {
+    warp::reply::with_status(warp::reply(), e.into())
 }
 
 #[derive(Debug, Deserialize, Serialize)]
