@@ -32,11 +32,16 @@ use podsync::{PodSync, PodSyncAuthed};
 mod path_format;
 use path_format::split_format_json;
 
+mod args;
+use args::Args;
+
 static DB_URL: &str = "sqlite://pod.sql";
 static COOKIE_NAME: &str = "sessionid"; // gpodder/mygpo, doc/api/reference/auth.rst:16
 
 #[tokio::main]
 async fn main() {
+    let args = <Args as clap::Parser>::parse();
+
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
         .finish();
@@ -65,6 +70,7 @@ async fn main() {
         .await
         .expect("migration");
 
+    let secure = args.secure();
     let podsync = Arc::new(PodSync::new(db));
 
     let auth = {
@@ -90,7 +96,7 @@ async fn main() {
                         let session_id = podsync.session_id();
 
                         let cookie = Cookie::build(COOKIE_NAME, session_id.to_string())
-                            // .secure(true) // TODO: when in prod
+                            .secure(secure)
                             .http_only(true)
                             .same_site(SameSite::Strict)
                             .max_age(2.weeks())
@@ -228,7 +234,7 @@ async fn main() {
         .with(warp::trace::request());
 
     warp::serve(routes)
-        .run(([0, 0, 0, 0], 8081))
+        .run(args.addr())
         .await;
 }
 

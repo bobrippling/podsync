@@ -12,6 +12,7 @@ repository = "https://github.com/bobrippling/podsync"
 tokio = { version = "1.26.0", features = ["full"] }
 serde = { version = "1.0.152", features = ["derive"] }
 time = { version = "0.3.20", features = ["serde", "formatting", "parsing", "macros"] }
+clap = { version = "4.1.8", features = ["derive"] }
 
 cookie = "0.17.0"
 warp = "0.3.3"
