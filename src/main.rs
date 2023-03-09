@@ -3,7 +3,9 @@ use std::{
     future::Future,
 };
 
-use warp::{Filter, Reply, http::header::{HeaderMap, HeaderValue}};
+use time::ext::NumericalDuration;
+use warp::{Filter, Reply, http::{self, header::{HeaderMap, HeaderValue}}, hyper::Body};
+use cookie::{Cookie, SameSite};
 use serde::{Deserialize, Serialize};
 
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
@@ -15,7 +17,6 @@ mod auth;
 use auth::{BasicAuth, SessionId};
 
 mod user;
-use user::User;
 
 mod device;
 
@@ -26,7 +27,7 @@ mod episode;
 use episode::EpisodeChangeWithDevice;
 
 mod podsync;
-use podsync::PodSync;
+use podsync::{PodSync, PodSyncAuthed};
 
 mod path_format;
 use path_format::split_format_json;
@@ -74,37 +75,33 @@ async fn main() {
             .and(warp::cookie::optional(COOKIE_NAME))
             .then({
                 let podsync = Arc::clone(&podsync);
-                move |username: String, auth: Option<BasicAuth>, session_id: Option<String>| {
+                move |username: String, auth: Option<BasicAuth>, session_id: Option<SessionId>| {
                     let podsync = Arc::clone(&podsync);
 
-                    result_to_response(async move {
+                    result_to_headers(async move {
                         let auth = match auth {
                             Some(auth) => auth.with_path_username(&username),
                             None => Err(podsync::Error::Unauthorized),
                         }?;
 
-                        let maybe_session_id = session_id
-                            .as_deref()
-                            .map(SessionId::try_from)
-                            .transpose()
-                            .map_err(|()| podsync::Error::BadRequest)?;
-
                         let podsync = podsync
-                            .login(&auth, maybe_session_id)
+                            .login(auth, session_id)
                             .await?;
                         let session_id = podsync.session_id();
 
-                        let headers = HeaderMap::new();
-                        headers.insert(
-                            COOKIE_NAME,
-                            HeaderValue::from_str(&session_id.to_string())
-                                .map_err(|_| podsync::Error::Internal)?,
-                        );
+                        let cookie = Cookie::build(COOKIE_NAME, session_id.to_string())
+                            // .secure(true) // TODO: when in prod
+                            .http_only(true)
+                            .same_site(SameSite::Strict)
+                            .max_age(2.weeks())
+                            .path("/api")
+                            .finish();
 
-                        Ok((
-                            (),
-                            headers,
-                        ))
+                        let cookie = HeaderValue::from_str(&cookie.to_string())
+                            .map_err(|_| podsync::Error::Internal)?;
+                        let mut headers = HeaderMap::new();
+                        headers.insert("set-cookie", cookie);
+                        Ok(headers)
                     })
                 }
             });
@@ -114,117 +111,79 @@ async fn main() {
         login
     };
 
-    let auth_check = warp::cookie::<String>(COOKIE_NAME)
-        .then(|cookie| {
-            async move {
-                println!("got cookie: {cookie}");
+    let auth_check = warp::cookie(COOKIE_NAME)
+        .and_then({
+            let podsync = Arc::clone(&podsync);
 
-                // TODO: lookup user with session_id == {cookie} in DB and return some struct representing them
-                // User {
-                //     username: "uname_placeholder".to_string(),
-                //     pwhash: "ad08awd".to_string(),
-                // }
-                todo!()
+            move |session_id: SessionId| {
+                let podsync = Arc::clone(&podsync);
+
+                async move {
+                    podsync
+                        .authenticate(session_id)
+                        .await
+                        .map_err(warp::reject::custom)
+                }
             }
         });
 
     let devices = {
         let for_user = warp::path!("api" / "2" / "devices" / String)
             .and(warp::get())
-            .and(auth_check)
-            .then({
-                let podsync = Arc::clone(&podsync);
-                move |username_format: String, user: User| {
-                    let podsync = Arc::clone(&podsync);
+            .and(auth_check.clone())
+            .then(|username_format: String, podsync: PodSyncAuthed| result_to_json(async move {
+                let username = split_format_json(&username_format)?;
 
-                    result_to_response(async move {
-                        let username = split_format_json(&username_format)?;
+                let devs = podsync
+                    .with_user(username)?
+                    .devices()
+                    .await?;
 
-                        if user.username != username {
-                            return Err(podsync::Error::Unauthorized);
-                        }
+                Ok(devs)
+            }));
 
-                        // let credentials = Credentials { // user.with_user(username.to_string())?;
-                        //     user: "un".to_string(),
-                        //     pass: "pw".to_string(),
-                        // };
-
-                        podsync.authenticate(todo!())
-                            .await?
-                            .devices(username_format)
-                            .await
-                    })
-                }
-            });
-
-        /*
         let create = warp::path!("api" / "2" / "devices" / String / String)
             .and(warp::post())
-            .and(auth_check)
+            .and(auth_check.clone())
             .and(warp::body::json()) // TODO: this may just be an empty string
-            .then({
-                let podsync = Arc::clone(&podsync);
-                move |username, device_name, auth: Option<BasicAuth>, device| {
-                    let podsync = Arc::clone(&podsync);
-
-                    result_to_response(async move {
-                        let credentials = auth.with_user(username)?;
-
-                        podsync.authenticate(&credentials)
-                            .await?
-                            .create_device(device_name, device)
-                            .await
-                    })
-                }
+            .then(move |username: String, device_name, podsync: PodSyncAuthed, device| {
+                result_to_json(async move {
+                    podsync.with_user(&username)?
+                        .create_device(device_name, device)
+                        .await
+                })
             });
 
         for_user.or(create)
-        */
-        for_user
     };
 
-    /*
     let subscriptions = {
         let get = warp::path!("api" / "2" / "subscriptions" / String / String)
             // FIXME: merge this ^
             // with the below path (same for /episodes)
             .and(warp::get())
-            .and(auth_check)
-            .then({
-                let podsync = Arc::clone(&podsync);
-                move |username, deviceid_format: String, auth: Option<BasicAuth>| {
-                    let podsync = Arc::clone(&podsync);
-
-                    result_to_response(async move {
-                        let device_id = split_format_json(&deviceid_format)?;
-                        let credentials = auth.with_user(username)?;
-
-                        podsync.authenticate(&credentials)
-                            .await?
-                            .subscriptions(device_id)
-                            .await
-                    })
-                }
+            .and(auth_check.clone())
+            .then(move |username: String, deviceid_format: String, podsync: PodSyncAuthed| {
+                result_to_json(async move {
+                    let device_id = split_format_json(&deviceid_format)?;
+                    podsync.with_user(&username)?
+                        .subscriptions(device_id)
+                        .await
+                })
             });
 
         let upload = warp::path!("api" / "2" / "subscriptions" / String / String)
             .and(warp::post())
-            .and(auth_check)
+            .and(auth_check.clone())
             .and(warp::body::json())
-            .then({
-                let podsync = Arc::clone(&podsync);
-                move |username, deviceid_format: String, auth: Option<BasicAuth>, changes: SubscriptionChanges| {
-                    let podsync = Arc::clone(&podsync);
+            .then(move |username: String, deviceid_format: String, podsync: PodSyncAuthed, changes: SubscriptionChanges| {
+                result_to_json(async move {
+                    let device_id = split_format_json(&deviceid_format)?;
 
-                    result_to_response(async move {
-                        let credentials = auth.with_user(username)?;
-
-                        podsync.authenticate(&credentials)
-                            .await?
-                            .update_subscriptions(deviceid_format, changes)
-                            .await
-                    })
-                }
+                    podsync.with_user(&username)?
+                        .update_subscriptions(device_id, changes)
+                        .await
+                })
             });
 
         get.or(upload)
@@ -234,89 +193,54 @@ async fn main() {
         let get = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::get())
             .and(warp::query())
-            .and(auth_check)
-            .then({
-                let podsync = Arc::clone(&podsync);
-                move |username_format: String, query: QuerySince, user: User| {
-                    let podsync = Arc::clone(&podsync);
+            .and(auth_check.clone())
+            .then(move |username_format: String, query: QuerySince, podsync: PodSyncAuthed| {
+                result_to_json(async move {
+                    let username = split_format_json(&username_format)?;
 
-                    result_to_response(async move {
-                        let username = split_format_json(&username_format)?;
-                        let credentials = user.with_user(username.to_string())?;
-
-                        podsync.authenticate(&credentials)
-                            .await?
-                            .episodes(query)
-                            .await
-                    })
-                }
+                    podsync.with_user(&username)?
+                        .episodes(query)
+                        .await
+                })
             });
 
         let upload = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::post())
-            .and(auth_check)
+            .and(auth_check.clone())
             .and(warp::body::json())
-            .then({
-                let podsync = Arc::clone(&podsync);
-                move |username_format: String, auth: Option<BasicAuth>, body: Vec<EpisodeChangeWithDevice>| {
-                    let podsync = Arc::clone(&podsync);
+            .then(move |username_format: String, podsync: PodSyncAuthed, body: Vec<EpisodeChangeWithDevice>| {
+                result_to_json(async move {
+                    let username = split_format_json(&username_format)?;
 
-                    result_to_response(async move {
-                        let username = split_format_json(&username_format)?;
-                        let credentials = auth.with_user(username.to_string())?;
-
-                        podsync.authenticate(&credentials)
-                            .await?
-                            .update_episodes(body)
-                            .await
-                    })
-                }
+                    podsync.with_user(&username)?
+                        .update_episodes(body)
+                        .await
+                })
             });
 
         get.or(upload)
     };
-    */
-
-    let log = warp::log::custom(|info| {
-        println!("request headers:");
-        for (key, value) in info.request_headers() {
-            println!("  {:?}: {:?}", key, value);
-        }
-    });
 
     let routes = auth
         .or(devices)
-        // .or(subscriptions)
-        // .or(episodes)
-        .with(warp::trace::request())
-        .with(log);
+        .or(subscriptions)
+        .or(episodes)
+        .with(warp::trace::request());
 
     warp::serve(routes)
-        .run(([0, 0, 0, 0], 8080))
+        .run(([0, 0, 0, 0], 8081))
         .await;
 }
 
-async fn result_to_response<F, S>(f: F) -> impl warp::Reply
+async fn result_to_json<F, B>(f: F) -> impl warp::Reply
 where
-    F: Future<Output = podsync::Result<(S, HeaderMap)>>,
-    S: Serialize,
+    F: Future<Output = podsync::Result<B>>,
+    B: Serialize,
 {
     match f.await {
-        Ok((s, headers)) => {
-            let max_age = 1209600;
-
-            // FIXME: iterate over headers
-
-            warp::reply::with_header(
-                warp::reply::json(&s),
-                "set-cookie",
-                format!(
-                    "{}={}; Path=/; HttpOnly; Max-Age={}",
-                    COOKIE_NAME,
-                    "MYCOOKIE",
-                    max_age,
-                ),
-            ).into_response()
+        Ok(body) => {
+            warp::reply::json(&body)
+                .into_response()
         }
         Err(e) => {
             if false && matches!(e, podsync::Error::Unauthorized) {
@@ -337,14 +261,26 @@ where
     }
 }
 
-async fn result_to_headers<F, S>(f: F) -> impl warp::Reply
+async fn result_to_headers<F>(f: F) -> impl warp::Reply
 where
-    F: Future<Output = podsync::Result<S>>,
-    S: Serialize,
+    F: Future<Output = podsync::Result<HeaderMap>>,
 {
     match f.await {
-        Ok(s) => {
-            warp::reply::json(&s).into_response()
+        Ok(header_map) => {
+            let mut resp = http::Response::builder();
+
+            match resp.headers_mut() {
+                Some(headers) => headers.extend(header_map),
+                None => {
+                    for (name, value) in header_map {
+                        if let Some(name) = name {
+                            resp = resp.header(name, value);
+                        }
+                    }
+                }
+            }
+
+            resp.body(Body::empty()).unwrap()
         }
         Err(e) => {
             if false && matches!(e, podsync::Error::Unauthorized) {

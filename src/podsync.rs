@@ -1,14 +1,16 @@
-use std::future::Future;
+use std::str::FromStr;
+use std::{
+    future::Future,
+    sync::Arc
+};
 
 use sqlx::{Pool, Sqlite, Transaction, query, query_as};
 use warp::http;
 use serde::{Deserialize, Serialize};
 use tracing::error;
-use uuid::Uuid;
 
 use crate::auth::{AuthAttempt, SessionId};
 use crate::user::User;
-use crate::split_format_json;
 use crate::QuerySince;
 use crate::device::{Device, DeviceCreate, DeviceType};
 use crate::subscription::SubscriptionChanges;
@@ -20,10 +22,10 @@ use crate::episode::{
 
 pub struct PodSync(Pool<Sqlite>);
 
-pub struct PodSyncAuthed<'s> {
-    sync: &'s PodSync,
+pub struct PodSyncAuthed<const USER_MATCH: bool = false> {
+    sync: Arc<PodSync>,
     session_id: SessionId,
-    user: &'s str,
+    username: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -32,6 +34,7 @@ pub struct UpdatedUrls {
     update_urls: Vec<[String; 2]>,
 }
 
+#[derive(Debug)]
 pub enum Error {
     Internal,
     Unauthorized,
@@ -50,16 +53,18 @@ impl Into<http::StatusCode> for Error {
     }
 }
 
+impl warp::reject::Reject for Error {}
+
 impl PodSync {
     pub fn new(db: Pool<Sqlite>) -> Self {
         Self(db)
     }
 
-    pub async fn login<'s>(
-        &'s self,
-        auth_attempt: &'s AuthAttempt,
-        session_id: Option<SessionId>,
-    ) -> Result<PodSyncAuthed<'s>> {
+    pub async fn login(
+        self: &Arc<Self>,
+        auth_attempt: AuthAttempt,
+        client_session_id: Option<SessionId>,
+    ) -> Result<PodSyncAuthed> {
         let username = auth_attempt.user();
 
         let user = query_as!(
@@ -88,65 +93,135 @@ impl PodSync {
             return Err(Error::Unauthorized);
         }
 
-        let new_session = || async {
-            let session_id = Uuid::new_v4();
-            let str = session_id.as_simple().to_string();
+        let ok = |session_id| Ok(PodSyncAuthed {
+            sync: Arc::clone(self),
+            session_id,
+            username: auth_attempt.user().to_string(),
+        });
 
-            query!(
-                "
-                UPDATE users
-                SET session_id = ?
-                WHERE username = ?
-                ",
-                str,
-                username,
-            )
-                .execute(&self.0)
-                .await
-                .map_err(|e| {
-                    error!("couldn't login user {}: {e:?}", username);
-                    Error::Internal
-                })?;
-
-            Ok(SessionId::from(session_id))
+        let db_session_id = match user.session_id {
+            Some(ref id) => {
+                 let session_id = SessionId::from_str(&id)
+                     .map_err(|()| {
+                         error!("invalid session_id in database: {:?}", user.session_id);
+                         Error::Internal
+                     })?;
+                 Some(session_id)
+            }
+            None => None,
         };
 
-        match (session_id, user.session_id) {
+        match (client_session_id, db_session_id) {
             (None, None) => {
                 // initial login
-                let session_id = new_session().await?;
-                Ok(PodSyncAuthed {
-                    sync: self,
-                    session_id,
-                    user: auth_attempt.user(),
-                })
+                let session_id = SessionId::new();
+                let str = session_id.to_string();
+
+                query!(
+                    "
+                    UPDATE users
+                    SET session_id = ?
+                    WHERE username = ?
+                    ",
+                    str,
+                    username,
+                )
+                    .execute(&self.0)
+                    .await
+                    .map_err(|e| {
+                        error!("couldn't login user {}: {e:?}", username);
+                        Error::Internal
+                    })?;
+
+                ok(session_id)
             }
-            (Some(client), Some(real)) => {
-                // checking their token still works
-                Err(Error::Internal) // TODO
+            (Some(client), Some(db_id)) => {
+                if client == db_id {
+                    ok(client)
+                } else {
+                    Err(Error::Internal)
+                }
             }
             (Some(_), None) => {
                 // logged out but somehow kept their token?
-                Err(Error::Internal) // TODO
+                Err(Error::Internal)
             }
-            (None, Some(real)) => {
+            (None, Some(db_id)) => {
                 // logging in again, client's forgot their token
-                Err(Error::Internal) // TODO
+                ok(db_id)
             }
         }
 
     }
+
+    pub async fn authenticate(self: &Arc<Self>, session_id: SessionId) -> Result<PodSyncAuthed> {
+        let session_str = session_id.to_string();
+
+        let users = query_as!(
+            User,
+            r#"
+            SELECT *
+            FROM users
+            WHERE session_id = ?
+            "#,
+            session_str,
+        )
+            .fetch_all(&self.0)
+            .await
+            .map_err(|e| {
+                error!("couldn't query for session {session_id}: {e:?}");
+                Error::Internal
+            })?;
+
+        match &users[..] {
+            [] => {
+                error!("no user found for session {session_id}");
+                Err(Error::Unauthorized)
+            },
+            [user] => {
+                assert_eq!(user.session_id, Some(session_str));
+
+                Ok(PodSyncAuthed {
+                    sync: Arc::clone(self),
+                    session_id,
+                    username: user.username.clone(),
+                })
+            }
+            _ => {
+                error!("multiple users found for session {session_id}");
+                Err(Error::Internal)
+            }
+        }
+    }
 }
 
-impl PodSyncAuthed<'_> {
-    pub fn session_id(&self) -> SessionId {
-        self.session_id
+impl PodSyncAuthed {
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
     }
 
-    pub async fn devices(&self, username_format: String) -> Result<Vec<Device>> {
-        let username = split_format_json(&username_format)?;
+    pub fn with_user(self, username: &str) -> Result<PodSyncAuthed<true>> {
+        if username == self.username {
+            Ok(PodSyncAuthed {
+                sync: self.sync,
+                session_id: self.session_id,
+                username: self.username,
+            })
+        } else {
+            error!(
+                "mismatching session & username: session={{ username: {}, session_id: {} }}, username={username}",
+                self.username,
+                self.session_id,
+            );
+            Err(Error::Unauthorized)
+        }
+    }
+}
 
-        // TODO
+impl PodSyncAuthed<true> {
+    pub async fn devices(&self) -> Result<Vec<Device>> {
+        let username = &self.username;
+
         let result = query_as!(
                 Device,
                 r#"
@@ -174,7 +249,7 @@ impl PodSyncAuthed<'_> {
         new_device: DeviceCreate
     ) -> Result<()>
     {
-        let username = self.user;
+        let username = &self.username;
         println!("got device creation {device_name} for {username}: {new_device:?}");
 
         let caption = new_device.caption.as_deref().unwrap_or("");
@@ -239,10 +314,10 @@ impl PodSyncAuthed<'_> {
 
     pub async fn update_subscriptions(
         &self,
-        device_id: String,
+        device_id: &str,
         changes: SubscriptionChanges
     ) -> Result<UpdatedUrls> {
-        let username = self.user;
+        let username = &self.username;
 
         println!("got urls for {username}'s device {device_id}, timestamp {:?}:", changes.timestamp);
 
@@ -302,7 +377,7 @@ impl PodSyncAuthed<'_> {
         -> Result<EpisodeChanges>
     {
         // podcast, episode, action, timestamp?, guid?, ...{started,position,total}?
-        println!("episodes GET for {} since {query:?}", self.user);
+        println!("episodes GET for {} since {query:?}", self.username);
 
         // TODO
         // let result = query_as!(
@@ -324,9 +399,9 @@ impl PodSyncAuthed<'_> {
         -> Result<UpdatedUrls>
     {
         // podcast, episode, guid: optional
-        println!("episodes POST for {}", self.user);
+        println!("episodes POST for {}", self.username);
 
-        let username = self.user;
+        let username = &self.username;
 
         self.transact(|mut tx| async move {
             for EpisodeChangeWithDevice { change, device } in body {

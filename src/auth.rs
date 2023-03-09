@@ -16,29 +16,14 @@ pub struct AuthAttempt {
     auth: BasicAuth,
 }
 
+#[derive(PartialEq, Eq)]
 pub struct SessionId(Uuid);
-
-impl std::fmt::Display for SessionId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.as_simple().fmt(f)
-    }
-}
 
 impl BasicAuth {
     pub fn with_path_username(self, username: &str) -> podsync::Result<AuthAttempt> {
         (self.user == username)
             .then(|| AuthAttempt { auth: self })
             .ok_or(podsync::Error::Unauthorized)
-    }
-}
-
-impl AuthAttempt {
-    pub fn user(&self) -> &str {
-        &self.auth.user
-    }
-
-    pub fn calc_pwhash(&self) -> String {
-        digest(self.auth.pass)
     }
 }
 
@@ -71,10 +56,32 @@ impl FromStr for BasicAuth {
     }
 }
 
-impl TryFrom<&str> for SessionId {
-    type Error = ();
+impl AuthAttempt {
+    pub fn user(&self) -> &str {
+        &self.auth.user
+    }
 
-    fn try_from(s: &str) -> Result<Self, ()> {
+    pub fn calc_pwhash(&self) -> String {
+        digest(&self.auth.pass[..])
+    }
+}
+
+impl SessionId {
+    pub fn new() -> Self {
+        Self::from(Uuid::new_v4())
+    }
+}
+
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.as_simple().fmt(f)
+    }
+}
+
+impl FromStr for SessionId {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         Uuid::try_from(s).map(Self).map_err(|_| ())
     }
 }
