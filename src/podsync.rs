@@ -164,11 +164,11 @@ impl PodSync {
 
         let users = query_as!(
             User,
-            r#"
+            "
             SELECT *
             FROM users
             WHERE session_id = ?
-            "#,
+            ",
             session_str,
         )
             .fetch_all(&self.0)
@@ -387,11 +387,11 @@ impl PodSyncAuthed<true> {
         // TODO
         // let result = query_as!(
         //     EpisodeChangeRaw,
-        //     r#"
+        //     "
         //     SELECT podcast, episode, timestamp, guid, action, started, position, total
         //     FROM episodes
         //     WHERE username = ?
-        //     "#,
+        //     ",
         //     username,
         // )
         //     .fetch_all(&*db)
