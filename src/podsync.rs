@@ -224,6 +224,26 @@ impl PodSyncAuthed {
 }
 
 impl PodSyncAuthed<true> {
+    pub async fn logout(&self) -> Result<()> {
+        let username = &self.username;
+
+        query!(
+                "
+                UPDATE users
+                SET session_id = NULL
+                WHERE username = ?
+                ",
+                username,
+        )
+                .execute(&self.sync.0)
+                .await
+                .map(|_| ())
+                .map_err(|e| {
+                    error!("error updating session_id: {e:?}");
+                    Error::Internal
+                })
+    }
+
     pub async fn devices(&self) -> Result<Vec<Device>> {
         let username = &self.username;
 

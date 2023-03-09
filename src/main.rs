@@ -68,6 +68,22 @@ async fn main() {
     let secure = args.secure();
     let podsync = Arc::new(PodSync::new(db));
 
+    let auth_check = warp::cookie(COOKIE_NAME)
+        .and_then({
+            let podsync = Arc::clone(&podsync);
+
+            move |session_id: SessionId| {
+                let podsync = Arc::clone(&podsync);
+
+                async move {
+                    podsync
+                        .authenticate(session_id)
+                        .await
+                        .map_err(warp::reject::custom)
+                }
+            }
+        });
+
     let auth = {
         let login =
             warp::post()
@@ -107,26 +123,19 @@ async fn main() {
                 }
             });
 
-        // TODO: logout (https://github.com/gpodder/mygpo/blob/HEAD/doc/api/reference/auth.rst)
-        //login.or(logout)
-        login
+        let logout =
+            warp::post()
+            .and(warp::path!("api" / "2" / "auth" / String / "logout.json"))
+            .and(auth_check.clone())
+            .then(move |username: String, podsync: PodSyncAuthed| result_to_ok(async move {
+                podsync
+                    .with_user(&username)?
+                    .logout()
+                    .await
+            }));
+
+        login.or(logout)
     };
-
-    let auth_check = warp::cookie(COOKIE_NAME)
-        .and_then({
-            let podsync = Arc::clone(&podsync);
-
-            move |session_id: SessionId| {
-                let podsync = Arc::clone(&podsync);
-
-                async move {
-                    podsync
-                        .authenticate(session_id)
-                        .await
-                        .map_err(warp::reject::custom)
-                }
-            }
-        });
 
     let devices = {
         let for_user = warp::path!("api" / "2" / "devices" / String)
