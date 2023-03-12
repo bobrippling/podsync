@@ -256,7 +256,7 @@ impl PodSyncAuthed<true> {
             FROM devices
             INNER JOIN subscriptions
                 ON devices.username = subscriptions.username
-            GROUP BY devices.username
+            GROUP BY devices.username, devices.id
             HAVING devices.username = ?
             "#,
             username,
