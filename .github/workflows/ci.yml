@@ -1,0 +1,29 @@
+name: podsync ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Rust Setup
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+
+      - name: Format
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - name: Check
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
