@@ -519,14 +519,21 @@ impl PodSyncAuthed<true> {
             .filter_map(|ep| ep.modified)
             .max();
 
-        let episodes = episodes
+        let mut episodes = episodes
             .into_iter()
             .map(TryInto::try_into)
-            .collect::<result::Result<Vec<_>, _>>()
+            .collect::<result::Result<Vec<Episode>, _>>()
             .map_err(|e| {
                 error!("couldn't construct episode changes from DB: {e:?}");
                 Error::Internal
             })?;
+
+        // workaround a bug in antennapod - populate the timestamp (EpisodeActionFilter.java:75)
+        for ep in &mut episodes {
+            if ep.timestamp.is_none() {
+                ep.timestamp = Some(Default::default());
+            }
+        }
 
         Ok(Episodes {
             timestamp: latest.unwrap_or_default(),

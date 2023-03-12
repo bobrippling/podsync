@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-use super::{EpisodeAction, EpisodeActionRaw};
-use super::action::TimePrimitive;
+use super::{
+    time::Time,
+    EpisodeAction,
+    EpisodeActionRaw,
+    action::TimePrimitive,
+};
 use crate::time::Timestamp;
 
 #[derive(Debug, Clone)]
@@ -11,7 +15,7 @@ use crate::time::Timestamp;
 pub struct Episode {
     pub podcast: String,
     pub episode: String,
-    pub timestamp: Option<Timestamp>,
+    pub timestamp: Option<Time>,
     pub guid: Option<String>,
     pub action: EpisodeAction,
     pub device: Option<String>, // optional on from-client, not present on to-client
@@ -26,7 +30,7 @@ pub struct EpisodeRaw {
     pub podcast: String,
     pub episode: String,
 
-    pub timestamp: Option<Timestamp>,
+    pub timestamp: Option<Time>,
     pub guid: Option<String>,
     pub action: EpisodeActionRaw,
     pub started: Option<TimePrimitive>,
