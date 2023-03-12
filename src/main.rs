@@ -268,7 +268,7 @@ async fn main() {
                 target: "podsync::warp",
                 "{} {} \"{} {} {:?}\" {} \"{}\" \"{}\" {:?}",
                 OptFmt(info.remote_addr()),
-                OptFmt(now),
+                now.as_deref().unwrap_or("<notime>"),
                 info.method(),
                 info.path(),
                 info.version(),
