@@ -1,18 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-use sqlx::FromRow;
-
-#[derive(Debug, Serialize, FromRow)]
-pub struct Device {
-    // pub id: i64, // FIXME: String, convert when pulling out of the DB? change the DB type?
-    pub caption: String,
-
-    // #[sqlx(try_from = "String")]
-    pub r#type: DeviceType,
-
-    #[serde(skip)] // FIXME
-    pub username: String,
-}
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug, sqlx::Type, Serialize)]
 pub struct DeviceAndSub {
@@ -23,7 +9,7 @@ pub struct DeviceAndSub {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct DeviceUpdate { // FIXME: allow "" to deserialise to this
+pub struct DeviceUpdate {
     pub caption: Option<String>,
     pub r#type: Option<DeviceType>,
 }
@@ -35,7 +21,6 @@ pub enum DeviceType {
     Laptop,
     Mobile,
     Server,
-    // #[serde(with = "null_type")] TODO
     Other, // aka null
 }
 
