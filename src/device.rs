@@ -28,7 +28,7 @@ pub struct DeviceUpdate { // FIXME: allow "" to deserialise to this
     pub r#type: Option<DeviceType>,
 }
 
-#[derive(Debug, Deserialize, Serialize, sqlx::Type)]
+#[derive(Debug, Deserialize, Serialize, sqlx::Type, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceType {
     Desktop,
@@ -37,6 +37,10 @@ pub enum DeviceType {
     Server,
     // #[serde(with = "null_type")] TODO
     Other, // aka null
+}
+
+impl Default for DeviceType {
+    fn default() -> Self { Self::Other }
 }
 
 // mod null_type {

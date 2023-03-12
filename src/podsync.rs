@@ -12,7 +12,7 @@ use log::{error, trace};
 use crate::auth::{AuthAttempt, SessionId};
 use crate::user::User;
 use crate::QuerySince;
-use crate::device::{DeviceAndSub, DeviceUpdate, DeviceType};
+use crate::device::{DeviceAndSub, DeviceUpdate};
 use crate::subscription::SubscriptionChanges;
 use crate::episode::{
     EpisodeChanges,
@@ -271,26 +271,33 @@ impl PodSyncAuthed<true> {
 
     pub async fn update_device(
         &self,
-        device_name: String,
-        new_device: DeviceUpdate
+        device_id: &str,
+        update: DeviceUpdate
     ) -> Result<()>
     {
         let username = &self.username;
-        trace!("{username} updating device {device_name}: {new_device:?}");
+        trace!("{username} updating device {device_id}: {update:?}");
 
-        let caption = new_device.caption.as_deref().unwrap_or("");
-        let r#type = new_device.r#type.unwrap_or(DeviceType::Other);
-
-        // FIXME: update only values that've been provided
+        let caption: Option<_> = update.caption;
+        let type_default = update.r#type.clone().unwrap_or_default();
+        let r#type: Option<_> = update.r#type;
 
         let result = query!(
-            "INSERT INTO devices
-            (caption, type, username)
+            "
+            INSERT INTO devices
+            (id, username, caption, type)
             VALUES
-            (?, ?, ?)",
-            caption,
-            r#type,
-            username,
+            (?, ?, ?, ?)
+            ON CONFLICT
+            DO
+                UPDATE SET
+                    caption = coalesce(?, devices.caption),
+                    type = coalesce(?, devices.type)
+                WHERE id = ? AND username = ?
+            ",
+            device_id, username, caption, type_default,
+            caption, r#type,
+            device_id, username
         )
             .execute(&self.sync.0)
             .await;
@@ -298,9 +305,7 @@ impl PodSyncAuthed<true> {
         match result {
             Ok(_result) => Ok(()),
             Err(e) => {
-                // FIXME: handle EEXIST (and others?)
                 error!("error inserting device: {:?}", e);
-
                 Err(Error::Internal)
             }
         }

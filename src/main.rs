@@ -152,19 +152,20 @@ async fn main() {
                 Ok(devs)
             }));
 
-        let create = warp::path!("api" / "2" / "devices" / String / String)
+        let update = warp::path!("api" / "2" / "devices" / String / String)
             .and(warp::post())
             .and(auth_check.clone())
-            .and(warp::body::json()) // TODO: this may just be an empty string
-            .then(move |username: String, device_name, podsync: PodSyncAuthed, device| {
-                result_to_json(async move {
+            .and(warp::body::json())
+            .then(move |username: String, deviceid_format: String, podsync: PodSyncAuthed, device| {
+                result_to_ok(async move {
+                    let device_id = split_format_json(&deviceid_format)?;
                     podsync.with_user(&username)?
-                        .update_device(device_name, device)
+                        .update_device(device_id, device)
                         .await
                 })
             });
 
-        for_user.or(create)
+        for_user.or(update)
     };
 
     let subscriptions = {
