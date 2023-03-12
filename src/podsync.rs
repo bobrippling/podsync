@@ -133,26 +133,26 @@ impl PodSync {
                         Error::Internal
                     })?;
 
-                trace!("new session created");
+                trace!("{username} login: new session created");
                 ok(session_id)
             }
             (Some(client), Some(db_id)) => {
                 if client == db_id {
-                    trace!("session check passed");
+                    trace!("{username} login: session check passed");
                     ok(client)
                 } else {
-                    trace!("session check failed");
+                    trace!("{username} login: session check failed");
                     Err(Error::Internal)
                 }
             }
             (Some(_), None) => {
                 // logged out but somehow kept their token?
-                trace!("no session in db");
+                trace!("{username} login: no session in db");
                 Err(Error::Unauthorized)
             }
             (None, Some(db_id)) => {
                 // logging in again, client's forgot their token
-                trace!("fresh login");
+                trace!("{username} login: fresh login");
                 ok(db_id)
             }
         }
@@ -226,6 +226,7 @@ impl PodSyncAuthed {
 impl PodSyncAuthed<true> {
     pub async fn logout(&self) -> Result<()> {
         let username = &self.username;
+        trace!("{username} logout");
 
         query!(
                 "
@@ -246,6 +247,7 @@ impl PodSyncAuthed<true> {
 
     pub async fn devices(&self) -> Result<Vec<DeviceAndSub>> {
         let username = &self.username;
+        trace!("{username} getting devices");
 
         query_as!(
             DeviceAndSub,
