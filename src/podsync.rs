@@ -252,7 +252,7 @@ impl PodSyncAuthed<true> {
         query_as!(
             DeviceAndSub,
             r#"
-            SELECT id, caption, type as "type: _", COUNT(*) as "subscriptions!: _"
+            SELECT id, caption as "caption!: _", type as "type!: _", COUNT(*) as "subscriptions!: _"
             FROM devices
             INNER JOIN subscriptions
                 ON devices.username = subscriptions.username
