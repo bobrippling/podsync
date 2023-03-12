@@ -1,0 +1,261 @@
+{
+  "db": "SQLite",
+  "231f8122b0dadd15f2e33c64f5d1a14b8f70081174d9f027e43235eac55b9acc": {
+    "describe": {
+      "columns": [
+        {
+          "name": "username",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "pwhash",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "session_id",
+          "ordinal": 2,
+          "type_info": "Text"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        true
+      ],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "\n                SELECT *\n                FROM users\n                WHERE username = ?\n                "
+  },
+  "3d4a325e98d31cb1ff2a7396da6a0712f0abb0dc5203deb5738734e83c198cf6": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "\n                UPDATE users\n                SET session_id = NULL\n                WHERE username = ?\n                "
+  },
+  "3fb9d968e52bdbfc981705fd91aa8b6b2c3d573a2e7dce7fe9652c1913a2f5bd": {
+    "describe": {
+      "columns": [
+        {
+          "name": "url",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "deleted: _",
+          "ordinal": 1,
+          "type_info": "Int64"
+        },
+        {
+          "name": "created!: _",
+          "ordinal": 2,
+          "type_info": "Int64"
+        }
+      ],
+      "nullable": [
+        false,
+        true,
+        false
+      ],
+      "parameters": {
+        "Right": 4
+      }
+    },
+    "query": "\n            SELECT url,\n                deleted as \"deleted: _\",\n                created as \"created!: _\"\n            FROM subscriptions\n            WHERE username = ?\n                AND device = ?\n                AND (\n                    created > ? OR deleted > ?\n                )\n            "
+  },
+  "498016c291834ae5044f5ba0318ab3779bb0c01e0abedc0b5d40f0a6346f21c8": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 4
+      }
+    },
+    "query": "\n                    UPDATE subscriptions\n                    SET\n                        deleted = ?\n                    WHERE username = ?\n                        AND device = ?\n                        AND url = ?\n                        AND deleted IS NULL\n                    "
+  },
+  "49d2a76b5641069f59e4e24d32fd5830d2b4c26f82b90e0078e576d787317b0a": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 18
+      }
+    },
+    "query": "\n                    INSERT INTO episodes\n                    (\n                        username, device,\n                        podcast, episode,\n                        timestamp, guid,\n                        action,\n                        started, position, total,\n                        modified\n                    )\n                    VALUES\n                    (\n                        ?, ?,\n                        ?, ?,\n                        ?, ?,\n                        ?,\n                        ?, ?, ?,\n                        ?\n                    )\n                    ON CONFLICT\n                    DO\n                        UPDATE SET\n                            timestamp = coalesce(?, episodes.timestamp),\n                            guid = coalesce(?, episodes.guid),\n                            action = coalesce(?, episodes.action),\n                            started = coalesce(?, episodes.started),\n                            position = coalesce(?, episodes.position),\n                            total = coalesce(?, episodes.total),\n                            modified = ?\n                    "
+  },
+  "4a1e8d47d3e4934dc2d652725ca1adb882ed387bf6565d6d27f5392ab6b77560": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "\n                    UPDATE users\n                    SET session_id = ?\n                    WHERE username = ?\n                    "
+  },
+  "57d484d4581d50a8d41a914e79e6a0870f73f7915acbe7ba84783bcf15aaadc6": {
+    "describe": {
+      "columns": [
+        {
+          "name": "podcast",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "episode",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "guid",
+          "ordinal": 2,
+          "type_info": "Text"
+        },
+        {
+          "name": "device",
+          "ordinal": 3,
+          "type_info": "Text"
+        },
+        {
+          "name": "timestamp: _",
+          "ordinal": 4,
+          "type_info": "Int64"
+        },
+        {
+          "name": "action!: _",
+          "ordinal": 5,
+          "type_info": "Text"
+        },
+        {
+          "name": "started",
+          "ordinal": 6,
+          "type_info": "Int64"
+        },
+        {
+          "name": "position",
+          "ordinal": 7,
+          "type_info": "Int64"
+        },
+        {
+          "name": "total",
+          "ordinal": 8,
+          "type_info": "Int64"
+        },
+        {
+          "name": "modified?: _",
+          "ordinal": 9,
+          "type_info": "Int64"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        true,
+        true,
+        true,
+        false,
+        true,
+        true,
+        true,
+        false
+      ],
+      "parameters": {
+        "Right": 4
+      }
+    },
+    "query": "\n            SELECT episodes.podcast, episode,\n                guid, episodes.device,\n                timestamp as \"timestamp: _\",\n                action as \"action!: _\",\n                started, position, total,\n                modified as \"modified?: _\"\n            FROM\n                episodes,\n                (SELECT ? as podcast, ? as device) as filter\n            WHERE username = ?\n                AND modified > ?\n                AND (filter.podcast IS NULL OR filter.podcast = episodes.podcast)\n                AND (filter.device IS NULL OR filter.device = episodes.device)\n            "
+  },
+  "90be6c101c11fa3847d2a2f7e1f70a7e9d2e686945c12e7382c832f989fce687": {
+    "describe": {
+      "columns": [
+        {
+          "name": "id",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "caption!: _",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "type!: _",
+          "ordinal": 2,
+          "type_info": "Text"
+        },
+        {
+          "name": "subscriptions!: _",
+          "ordinal": 3,
+          "type_info": "Null"
+        }
+      ],
+      "nullable": [
+        false,
+        true,
+        true,
+        null
+      ],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "\n            SELECT id, caption as \"caption!: _\", type as \"type!: _\", COUNT(*) as \"subscriptions!: _\"\n            FROM devices\n            INNER JOIN subscriptions\n                ON devices.username = subscriptions.username\n            GROUP BY devices.username, devices.id\n            HAVING devices.username = ?\n            "
+  },
+  "9e6dec71348701a9b6f9fc4b848aad31d654d1ff7c42cb49f4155cad1866618c": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 8
+      }
+    },
+    "query": "\n            INSERT INTO devices\n            (id, username, caption, type)\n            VALUES\n            (?, ?, ?, ?)\n            ON CONFLICT\n            DO\n                UPDATE SET\n                    caption = coalesce(?, devices.caption),\n                    type = coalesce(?, devices.type)\n                WHERE id = ? AND username = ?\n            "
+  },
+  "b276f81a7c3c206c558d6d5def3ffb19cf7bb46ad738e6c262ba3b592dd553e1": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 4
+      }
+    },
+    "query": "\n                    INSERT INTO subscriptions\n                    (username, device, url, created)\n                    VALUES\n                    (?, ?, ?, ?) -- `deleted` <- NULL\n                    ON CONFLICT\n                    DO NOTHING\n                    "
+  },
+  "f2909b05f07252d28cf3cf9f14d2a88a4e2805d3f012794ac7eca6250de084a5": {
+    "describe": {
+      "columns": [
+        {
+          "name": "username",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "pwhash",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "session_id",
+          "ordinal": 2,
+          "type_info": "Text"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        true
+      ],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "\n            SELECT *\n            FROM users\n            WHERE session_id = ?\n            "
+  }
+}
