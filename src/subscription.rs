@@ -1,31 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Subscription {
-    url: String,
-    title: String,
-    author: String,
-    description: String,
-    subscribers: u32,
-    logo_url: String,
-    scaled_logo_url: String,
-    website: String,
-    mygpo_link: String,
-}
+use crate::time::Timestamp;
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SubscriptionChanges {
-    pub add: Vec<String>, // TODO: make these &str?
+#[derive(Debug, Serialize)]
+pub struct SubscriptionChangesToClient {
+    pub add: Vec<String>,
     pub remove: Vec<String>,
-    pub timestamp: Option<u32>,
+    pub timestamp: Timestamp,
 }
 
-impl SubscriptionChanges {
-    pub fn empty() -> Self {
-        Self {
-            add: vec![],
-            remove: vec![],
-            timestamp: Some(0),
-        }
-    }
+#[derive(Debug, Deserialize)]
+pub struct SubscriptionChangesFromClient {
+    pub add: Vec<String>,
+    pub remove: Vec<String>,
 }

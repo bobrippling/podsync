@@ -3,7 +3,7 @@ use std::{
     future::Future,
 };
 
-use time::{OffsetDateTime, ext::NumericalDuration};
+use ::time::{OffsetDateTime, ext::NumericalDuration};
 use warp::{Filter, Reply, http::{self, header::{HeaderMap, HeaderValue}}, hyper::Body};
 use cookie::{Cookie, SameSite};
 use serde::{Deserialize, Serialize};
@@ -20,13 +20,14 @@ mod user;
 mod device;
 
 mod subscription;
-use subscription::SubscriptionChanges;
 
 mod episode;
 use episode::EpisodeChangeWithDevice;
 
 mod podsync;
 use podsync::{PodSync, PodSyncAuthed};
+
+mod time;
 
 mod path_format;
 use path_format::split_format_json;
@@ -170,15 +171,14 @@ async fn main() {
 
     let subscriptions = {
         let get = warp::path!("api" / "2" / "subscriptions" / String / String)
-            // FIXME: merge this ^
-            // with the below path (same for /episodes)
             .and(warp::get())
+            .and(warp::query())
             .and(auth_check.clone())
-            .then(move |username: String, deviceid_format: String, podsync: PodSyncAuthed| {
+            .then(move |username: String, deviceid_format: String, query: QuerySince, podsync: PodSyncAuthed| {
                 result_to_json(async move {
                     let device_id = split_format_json(&deviceid_format)?;
                     podsync.with_user(&username)?
-                        .subscriptions(device_id)
+                        .subscriptions(device_id, query.since)
                         .await
                 })
             });
@@ -187,7 +187,7 @@ async fn main() {
             .and(warp::post())
             .and(auth_check.clone())
             .and(warp::body::json())
-            .then(move |username: String, deviceid_format: String, podsync: PodSyncAuthed, changes: SubscriptionChanges| {
+            .then(move |username: String, deviceid_format: String, podsync: PodSyncAuthed, changes| {
                 result_to_json(async move {
                     let device_id = split_format_json(&deviceid_format)?;
 
@@ -238,7 +238,7 @@ async fn main() {
         .or(episodes)
         .with(warp::log::custom(|info| {
             use std::fmt::*;
-            use time::format_description::well_known::Rfc3339;
+            use ::time::format_description::well_known::Rfc3339;
 
             struct OptFmt<T>(Option<T>);
 
@@ -251,10 +251,9 @@ async fn main() {
                 }
             }
 
-            let now = match OffsetDateTime::now_local() {
-                Ok(now) => now.format(&Rfc3339).ok(),
-                Err(_) => None,
-            };
+            let now = OffsetDateTime::now_local()
+                .ok()
+                .and_then(|now| now.format(&Rfc3339).ok());
 
             info!(
                 target: "podsync::warp",
@@ -326,7 +325,7 @@ fn err_to_warp(e: podsync::Error) -> impl warp::Reply {
     warp::reply::with_status(warp::reply(), e.into())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 pub struct QuerySince {
-    since: u32,
+    since: crate::time::Timestamp,
 }

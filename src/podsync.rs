@@ -6,19 +6,20 @@ use std::{
 
 use sqlx::{Pool, Sqlite, Transaction, query, query_as};
 use warp::http;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use log::{error, trace};
 
 use crate::auth::{AuthAttempt, SessionId};
 use crate::user::User;
 use crate::QuerySince;
 use crate::device::{DeviceAndSub, DeviceUpdate};
-use crate::subscription::SubscriptionChanges;
+use crate::subscription::{SubscriptionChangesToClient, SubscriptionChangesFromClient};
 use crate::episode::{
     EpisodeChanges,
     EpisodeChangeWithDevice,
     EpisodeChangeRaw,
 };
+use crate::time::Timestamp;
 
 pub struct PodSync(Pool<Sqlite>);
 
@@ -28,10 +29,10 @@ pub struct PodSyncAuthed<const USER_MATCH: bool = false> {
     username: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct UpdatedUrls {
-    timestamp: u32,
-    update_urls: Vec<[String; 2]>,
+    timestamp: u64,
+    update_urls: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -311,12 +312,82 @@ impl PodSyncAuthed<true> {
         }
     }
 
-    pub async fn subscriptions(&self, _device_id: &str)
-        -> Result<SubscriptionChanges>
+    pub async fn subscriptions(&self, device_id: &str, since: Timestamp)
+        -> Result<SubscriptionChangesToClient>
     {
-        // println!("got subscriptions for {device_id} for {username}");
+        let username = &self.username;
 
-        Ok(SubscriptionChanges::empty())
+        trace!("{username} on {device_id}, requesting subscription changes since {since}");
+
+        #[derive(Debug, sqlx::FromRow)]
+        struct Url {
+            url: String,
+            deleted: Option<Timestamp>,
+            created: Timestamp,
+        }
+
+        let urls = query_as!(
+            Url,
+            r#"
+            SELECT url,
+                deleted as "deleted: _",
+                created as "created!: _"
+            FROM subscriptions
+            WHERE username = ?
+                AND device = ?
+                AND (
+                    created > ? OR deleted > ?
+                )
+            "#,
+            username,
+            device_id,
+            since,
+            since,
+        )
+            .fetch_all(&self.sync.0)
+            .await
+            .map_err(|e| {
+                error!("error selecting subscriptions: {e:?}");
+                Error::Internal
+            })?;
+
+        enum E {
+            Created(String),
+            Removed(String),
+        }
+
+        impl E {
+            fn url(self) -> String {
+                match self {
+                    E::Created(u) => u,
+                    E::Removed(u) => u,
+                }
+            }
+            fn is_create(&self) -> bool {
+                matches!(self, E::Created(_))
+            }
+        }
+
+        let latest = urls.iter().map(|u| u.created).max();
+
+        let (created, deleted): (Vec<_>, Vec<_>) = urls
+            .into_iter()
+            .map(|entry| {
+                match entry.deleted {
+                    Some(_) => E::Removed(entry.url),
+                    None => E::Created(entry.url),
+                }
+            })
+            .partition(E::is_create);
+
+        let created = created.into_iter().map(E::url).collect();
+        let deleted = deleted.into_iter().map(E::url).collect();
+
+        Ok(SubscriptionChangesToClient {
+            add: created,
+            remove: deleted,
+            timestamp: latest.unwrap_or_default(),
+        })
     }
 
     async fn transact<'t, T, R, F>(&self, transaction: T) -> Result<R>
@@ -332,6 +403,7 @@ impl PodSyncAuthed<true> {
                 Error::Internal
             })?;
 
+        // could probably pass &mut *tx here
         let (tx, r) = transaction(tx).await?;
 
         tx.commit()
@@ -347,21 +419,36 @@ impl PodSyncAuthed<true> {
     pub async fn update_subscriptions(
         &self,
         device_id: &str,
-        changes: SubscriptionChanges
+        changes: SubscriptionChangesFromClient
     ) -> Result<UpdatedUrls> {
+        use std::time::SystemTime;
+
         let username = &self.username;
 
-        println!("got urls for {username}'s device {device_id}, timestamp {:?}:", changes.timestamp);
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|e| {
+                error!("couldn't get time: {e:?}");
+                Error::Internal
+            })?
+            .as_secs();
+        let now = timestamp as i64;
 
-        self.transact(move |mut tx| async move {
+        trace!("subscription update for {username}'s device {device_id}");
+
+        self.transact(|mut tx| async {
             for url in &changes.remove {
                 query!(
                     "
-                    DELETE FROM subscriptions
+                    UPDATE subscriptions
+                    SET
+                        deleted = ?
                     WHERE username = ?
-                    AND device = ?
-                    AND url = ?
+                        AND device = ?
+                        AND url = ?
+                        AND deleted IS NULL
                     ",
+                    now,
                     username,
                     device_id,
                     url,
@@ -369,7 +456,7 @@ impl PodSyncAuthed<true> {
                     .execute(&mut *tx)
                     .await
                     .map_err(|e| {
-                        error!("error querying mid-transaction: {:?}", e);
+                        error!("error deleting (updating) subscription: {e:?}");
                         Error::Internal
                     })?;
             }
@@ -378,20 +465,21 @@ impl PodSyncAuthed<true> {
                 query!(
                     "
                     INSERT INTO subscriptions
-                    (url, device, username)
+                    (username, device, url, created)
                     VALUES
-                    (?, ?, ?)
-                    ON CONFLICT (url, device, username)
+                    (?, ?, ?, ?) -- `deleted` <- NULL
+                    ON CONFLICT
                     DO NOTHING
                     ",
-                    url,
-                    device_id,
                     username,
+                    device_id,
+                    url,
+                    now,
                 )
                     .execute(&mut *tx)
                     .await
                     .map_err(|e| {
-                        error!("error querying mid-transaction: {:?}", e);
+                        error!("error inserting subscription: {e:?}");
                         Error::Internal
                     })?;
             }
@@ -400,8 +488,13 @@ impl PodSyncAuthed<true> {
         }).await?;
 
         Ok(UpdatedUrls {
-            timestamp: 0, // TODO
-            update_urls: vec![], // unused by client
+            // important: this timestamp is used by future client synchronisations
+            timestamp,
+            // unused by client:
+            update_urls: changes.add
+                .into_iter()
+                .map(|url| (url.clone(), url))
+                .collect(),
         })
     }
 
