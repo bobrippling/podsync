@@ -279,7 +279,9 @@ async fn main() {
             );
         }));
 
-    warp::serve(routes).run(args.addr()).await;
+    warp::serve(routes)
+        .run(args.addr().expect("couldn't parse address"))
+        .await;
 }
 
 async fn result_to_json<F, B>(f: F) -> impl warp::Reply
