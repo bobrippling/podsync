@@ -1,17 +1,40 @@
 # podsync
 
-A HTTP server for syncing podcast app state, mirroring the gpodder API. Designed for use with [AntennaPod].
+A HTTP server for syncing podcast app state, mirroring the [gpodder API]. Designed for use with [AntennaPod]'s [sync service].
 
+[gpodder API]: https://github.com/gpodder/mygpo/blob/80c41dc0c9a58dc0e85f6ef56662cdfd0d6e3b16/doc/api/reference/events.rst
 [AntennaPod]: https://github.com/AntennaPod/AntennaPod
+[sync service]: https://github.com/AntennaPod/AntennaPod/blob/24d1a06662c8eec31f3a4c3ebdcd3aea759fb63a/core/src/main/java/de/danoeh/antennapod/core/sync/SyncService.java
+
+# Endpoints
+
+podsync doesn't cover the [full gpodder API], just enough to get AntennaPod to work:
+
+- auth:
+	- `POST api/2/auth/{username}/login.json`
+	- `POST api/2/auth/{username}/logout.json`
+- devices:
+	- `GET api/2/devices/{username}.json`
+	- `POST api/2/devices/{username}/{device}.json`
+- subscriptions:
+	- `GET api/2/subscriptions/{username}/{device}.json`
+	- `POST api/2/subscriptions/{username}/{device}.json`
+- episodes:
+	- `GET api/2/episodes/{username}.json`
+	- `POST api/2/episodes/{username}.json`
+
+[full gpodder API]: https://github.com/gpodder/mygpo/tree/80c41dc0c9a58dc0e85f6ef56662cdfd0d6e3b16/doc/api/reference
 
 # Building
 
-podsync uses sqlx in [offline mode] for builds.
+podsync uses sqlx in [offline mode] for builds (see [`build.rs`](./build.rs) for more).
 
 To update the schema:
-- `cargo install sqlx-cli`
-- `cargo sqlx prepare` (with a present database)
-- Commit in `sqlx-data.json`
-- Unset `DATABASE_URL` during compilation
+```sh
+export DATABASE_URL=sqlite://pod.sql
+cargo install sqlx-cli
+cargo sqlx prepare
+git commit -m 'Update sqlx snapshot' sqlx-data.json
+```
 
 [offline mode]: https://docs.rs/sqlx/latest/sqlx/macro.query.html#offline-mode-requires-the-offline-feature
