@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::{future::Future, result, sync::Arc};
 
-use log::{error, trace};
+use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, Pool, Sqlite, Transaction};
 use warp::http;
@@ -138,26 +138,26 @@ impl PodSync {
                     Error::Internal
                 })?;
 
-                trace!("{username} login: new session created");
+                info!("{username} login: new session created");
                 ok(session_id)
             }
             (Some(client), Some(db_id)) => {
                 if client == db_id {
-                    trace!("{username} login: session check passed");
+                    info!("{username} login: session check passed");
                     ok(client)
                 } else {
-                    trace!("{username} login: session check failed");
+                    info!("{username} login: session check failed");
                     Err(Error::Internal)
                 }
             }
             (Some(_), None) => {
                 // logged out but somehow kept their token?
-                trace!("{username} login: no session in db");
+                info!("{username} login: no session in db");
                 Err(Error::Unauthorized)
             }
             (None, Some(db_id)) => {
                 // logging in again, client's forgot their token
-                trace!("{username} login: fresh login");
+                info!("{username} login: fresh login");
                 ok(db_id)
             }
         }
@@ -230,7 +230,7 @@ impl PodSyncAuthed {
 impl PodSyncAuthed<true> {
     pub async fn logout(&self) -> Result<()> {
         let username = &self.username;
-        trace!("{username} logout");
+        info!("{username} logout");
 
         query!(
             "
@@ -268,7 +268,7 @@ impl PodSyncAuthed<true> {
         .fetch_all(&self.sync.0)
         .await
         .map(|devs| {
-            trace!("{username}, {} devices", devs.len());
+            info!("{username}, {} devices", devs.len());
             devs
         })
         .map_err(|e| {
@@ -279,7 +279,7 @@ impl PodSyncAuthed<true> {
 
     pub async fn update_device(&self, device_id: &str, update: DeviceUpdate) -> Result<()> {
         let username = &self.username;
-        trace!("{username} updating device {device_id}: {update:?}");
+        info!("{username} updating device {device_id}: {update:?}");
 
         let caption: Option<_> = update.caption;
         let type_default = update.r#type.clone().unwrap_or_default();
@@ -390,7 +390,7 @@ impl PodSyncAuthed<true> {
         let created: Vec<_> = created.into_iter().map(E::url).collect();
         let deleted: Vec<_> = deleted.into_iter().map(E::url).collect();
 
-        trace!(
+        info!(
             "{username} on {device_id}, {} subs created, {} deleted",
             created.len(),
             deleted.len(),
@@ -486,7 +486,7 @@ impl PodSyncAuthed<true> {
         })
         .await?;
 
-        trace!(
+        info!(
             "{username} on {device_id}, added {} subscriptions, removed {}",
             changes.add.len(),
             changes.remove.len()
@@ -563,7 +563,7 @@ impl PodSyncAuthed<true> {
         }
 
         let timestamp = latest.unwrap_or_default();
-        trace!(
+        info!(
             "{username}, {} episodes changes, latest: {timestamp}",
             episodes.len()
         );
@@ -670,7 +670,7 @@ impl PodSyncAuthed<true> {
         })
         .await?;
 
-        trace!("{username} updated {change_count} episodes");
+        info!("{username} updated {change_count} episodes");
 
         Ok(UpdatedUrls::just_timestamp(Timestamp::default()))
     }

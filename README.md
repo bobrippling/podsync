@@ -25,6 +25,23 @@ podsync doesn't cover the [full gpodder API], just enough to get AntennaPod to w
 
 [full gpodder API]: https://github.com/gpodder/mygpo/tree/80c41dc0c9a58dc0e85f6ef56662cdfd0d6e3b16/doc/api/reference
 
+# Logging
+
+podsync uses the `RUST_LOG` environment variable for logging. To generate logs similar to a webserver:
+```sh
+export RUST_LOG=podsync=info
+
+# or for debugging:
+export RUST_LOG=podsync=trace
+
+# for warp/endpoint output:
+export RUST_LOG=podsync=info,warp=info
+```
+
+See the [log crate] for more details
+
+[log crate]: https://crates.io/crates/log
+
 # Building
 
 podsync uses sqlx in [offline mode] for builds (see [`build.rs`](./build.rs) for more).
