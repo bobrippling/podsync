@@ -14,7 +14,7 @@ fn main() {
         Err(VarError::NotPresent) => {
             println!("cargo:warning={}", "using `sqlx-data.json` for schema");
             use_json()
-        },
+        }
         Err(e) => panic!("$DATABASE_URL: {e:?}"),
     }
 }

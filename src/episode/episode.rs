@@ -1,11 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{
-    time::Time,
-    EpisodeAction,
-    EpisodeActionRaw,
-    action::TimePrimitive,
-};
+use super::{action::TimePrimitive, time::Time, EpisodeAction, EpisodeActionRaw};
 use crate::time::Timestamp;
 
 #[derive(Debug, Clone)]

@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, sqlx::Type, Serialize)]
 pub struct DeviceAndSub {
@@ -25,7 +25,9 @@ pub enum DeviceType {
 }
 
 impl Default for DeviceType {
-    fn default() -> Self { Self::Other }
+    fn default() -> Self {
+        Self::Other
+    }
 }
 
 // mod null_type {
@@ -39,7 +41,7 @@ impl TryFrom<&'_ str> for DeviceType {
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s {
             "Mobile" => Ok(DeviceType::Mobile),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }

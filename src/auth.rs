@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use sha256::digest;
 use base64_light::base64_decode;
 use log::error;
+use sha256::digest;
 use uuid::Uuid;
 
 use crate::podsync;
@@ -31,23 +31,19 @@ impl FromStr for BasicAuth {
     type Err = &'static str;
 
     fn from_str(header: &str) -> Result<Self, Self::Err> {
-        let (basic, auth_b64) = header
-            .split_once(' ')
-            .ok_or("no space in auth header")?;
+        let (basic, auth_b64) = header.split_once(' ').ok_or("no space in auth header")?;
 
         if basic != "Basic" {
             return Err("only basic auth supported");
         }
 
         let auth_bytes = base64_decode(auth_b64);
-        let auth = std::str::from_utf8(&auth_bytes)
-            .map_err(|e| {
-                error!("invalid utf-8 for password: {e:?}");
-                "none-utf8 in auth header"
-            })?;
+        let auth = std::str::from_utf8(&auth_bytes).map_err(|e| {
+            error!("invalid utf-8 for password: {e:?}");
+            "none-utf8 in auth header"
+        })?;
 
-        let (user, pass) = auth.split_once(':')
-            .ok_or("no colon in auth value")?;
+        let (user, pass) = auth.split_once(':').ok_or("no colon in auth value")?;
 
         let user = user.into();
         let pass = pass.into();

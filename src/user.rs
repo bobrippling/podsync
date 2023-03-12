@@ -1,5 +1,4 @@
-#[derive(Debug)]
-#[derive(sqlx::Type)]
+#[derive(Debug, sqlx::Type)]
 pub struct User {
     pub username: String,
     pub pwhash: String,

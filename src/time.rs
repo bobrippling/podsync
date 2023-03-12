@@ -1,10 +1,9 @@
 use std::fmt;
 
 use log::error;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 #[derive(sqlx::Type)]
 #[sqlx(transparent)]
@@ -16,9 +15,7 @@ impl Timestamp {
 
         SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|duration| {
-                duration.as_secs() as i64
-            })
+            .map(|duration| duration.as_secs() as i64)
             .map(Self)
             .map_err(|e| {
                 error!("couldn't get time: {e:?}");
@@ -38,7 +35,7 @@ impl fmt::Display for Timestamp {
             return write!(fmt, "<epoch>");
         }
 
-        use ::time::{OffsetDateTime, format_description::well_known::Rfc3339};
+        use ::time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
         let formatted = OffsetDateTime::from_unix_timestamp(self.0)
             .ok()
@@ -46,7 +43,7 @@ impl fmt::Display for Timestamp {
 
         match formatted {
             Some(s) => write!(fmt, "{}", s),
-            None => write!(fmt, "{}", self.0)
+            None => write!(fmt, "{}", self.0),
         }
     }
 }

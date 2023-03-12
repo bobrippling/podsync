@@ -1,24 +1,20 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use time::{
-    PrimitiveDateTime,
     macros::{date, time},
+    PrimitiveDateTime,
 };
 
 // this struct exists to work around #[serde(with = ...)]
 // not handling Option for us
-#[derive(Debug, Clone)]
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(transparent)]
 #[derive(sqlx::Type)]
 #[sqlx(transparent)]
-pub struct Time(
-    #[serde(with = "time_no_offset")]
-    PrimitiveDateTime
-);
+pub struct Time(#[serde(with = "time_no_offset")] PrimitiveDateTime);
 
 impl Default for Time {
     fn default() -> Self {
-        let dt = PrimitiveDateTime::new(date!(1970-01-01), time!(0:00));
+        let dt = PrimitiveDateTime::new(date!(1970 - 01 - 01), time!(0:00));
         Self(dt)
     }
 }
