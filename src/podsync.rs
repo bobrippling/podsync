@@ -262,6 +262,10 @@ impl PodSyncAuthed<true> {
         )
             .fetch_all(&self.sync.0)
             .await
+            .map(|devs| {
+                trace!("{username}, {} devices", devs.len());
+                devs
+            })
             .map_err(|e| {
                 error!("error selecting devices: {:?}", e);
                 Error::Internal
@@ -378,8 +382,14 @@ impl PodSyncAuthed<true> {
             })
             .partition(E::is_create);
 
-        let created = created.into_iter().map(E::url).collect();
-        let deleted = deleted.into_iter().map(E::url).collect();
+        let created: Vec<_> = created.into_iter().map(E::url).collect();
+        let deleted: Vec<_> = deleted.into_iter().map(E::url).collect();
+
+        trace!(
+            "{username} on {device_id}, {} subs created, {} deleted",
+            created.len(),
+            deleted.len(),
+        );
 
         Ok(SubscriptionChangesToClient {
             add: created,
@@ -422,7 +432,7 @@ impl PodSyncAuthed<true> {
         let username = &self.username;
         let now = now()?;
 
-        trace!("subscription update for {username}'s device {device_id}");
+        trace!("{username} updating subscription for device {device_id}");
 
         self.transact(|mut tx| async {
             for url in &changes.remove {
@@ -474,6 +484,12 @@ impl PodSyncAuthed<true> {
 
             Ok((tx, ()))
         }).await?;
+
+        trace!(
+            "{username} on {device_id}, added {} subscriptions, removed {}",
+            changes.add.len(),
+            changes.remove.len()
+        );
 
         Ok(UpdatedUrls {
             timestamp: now,
@@ -535,8 +551,11 @@ impl PodSyncAuthed<true> {
             }
         }
 
+        let timestamp = latest.unwrap_or_default();
+        trace!("{username}, {} episodes changes, latest: {timestamp}", episodes.len());
+
         Ok(Episodes {
-            timestamp: latest.unwrap_or_default(),
+            timestamp,
             actions: episodes,
         })
     }
@@ -546,7 +565,7 @@ impl PodSyncAuthed<true> {
     {
         let username = &self.username;
 
-        trace!("episode update for {username}");
+        trace!("{username} updating episodes");
 
         let changes = body
             .into_iter()
@@ -558,6 +577,7 @@ impl PodSyncAuthed<true> {
             })?;
 
         let now = now()?;
+        let change_count = changes.len();
 
         self.transact(|mut tx| async {
             for change in changes {
@@ -622,6 +642,8 @@ impl PodSyncAuthed<true> {
 
             Ok((tx, ()))
         }).await?;
+
+        trace!("{username} updated {change_count} episodes");
 
         Ok(UpdatedUrls::just_timestamp(Timestamp::default()))
     }
