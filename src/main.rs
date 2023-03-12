@@ -22,7 +22,6 @@ mod device;
 mod subscription;
 
 mod episode;
-use episode::EpisodeChangeWithDevice;
 
 mod podsync;
 use podsync::{PodSync, PodSyncAuthed};
@@ -203,14 +202,14 @@ async fn main() {
     let episodes = {
         let get = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::get())
-            .and(warp::query())
+            .and(warp::query()) // TODO: ?aggregated=true (uniq on (sub, episode))
             .and(auth_check.clone())
             .then(move |username_format: String, query: QuerySince, podsync: PodSyncAuthed| {
                 result_to_json(async move {
                     let username = split_format_json(&username_format)?;
 
                     podsync.with_user(&username)?
-                        .episodes(query)
+                        .episodes(query.since)
                         .await
                 })
             });
@@ -219,7 +218,7 @@ async fn main() {
             .and(warp::post())
             .and(auth_check.clone())
             .and(warp::body::json())
-            .then(move |username_format: String, podsync: PodSyncAuthed, body: Vec<EpisodeChangeWithDevice>| {
+            .then(move |username_format: String, podsync: PodSyncAuthed, body| {
                 result_to_json(async move {
                     let username = split_format_json(&username_format)?;
 

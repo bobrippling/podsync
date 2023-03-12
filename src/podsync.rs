@@ -1,7 +1,8 @@
 use std::str::FromStr;
 use std::{
     future::Future,
-    sync::Arc
+    sync::Arc,
+    result,
 };
 
 use sqlx::{Pool, Sqlite, Transaction, query, query_as};
@@ -11,14 +12,9 @@ use log::{error, trace};
 
 use crate::auth::{AuthAttempt, SessionId};
 use crate::user::User;
-use crate::QuerySince;
 use crate::device::{DeviceAndSub, DeviceUpdate};
 use crate::subscription::{SubscriptionChangesToClient, SubscriptionChangesFromClient};
-use crate::episode::{
-    EpisodeChanges,
-    EpisodeChangeWithDevice,
-    EpisodeChangeRaw,
-};
+use crate::episode::{Episode, EpisodeRaw, Episodes};
 use crate::time::Timestamp;
 
 pub struct PodSync(Pool<Sqlite>);
@@ -31,7 +27,9 @@ pub struct PodSyncAuthed<const USER_MATCH: bool = false> {
 
 #[derive(Debug, Serialize)]
 pub struct UpdatedUrls {
-    timestamp: u64,
+    // important: this timestamp is used by future client synchronisations
+    timestamp: Timestamp,
+    // unused by antennapod
     update_urls: Vec<(String, String)>,
 }
 
@@ -42,7 +40,7 @@ pub enum Error {
     BadRequest,
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 impl Into<http::StatusCode> for Error {
     fn into(self) -> http::StatusCode {
@@ -421,18 +419,8 @@ impl PodSyncAuthed<true> {
         device_id: &str,
         changes: SubscriptionChangesFromClient
     ) -> Result<UpdatedUrls> {
-        use std::time::SystemTime;
-
         let username = &self.username;
-
-        let timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|e| {
-                error!("couldn't get time: {e:?}");
-                Error::Internal
-            })?
-            .as_secs();
-        let now = timestamp as i64;
+        let now = now()?;
 
         trace!("subscription update for {username}'s device {device_id}");
 
@@ -488,9 +476,7 @@ impl PodSyncAuthed<true> {
         }).await?;
 
         Ok(UpdatedUrls {
-            // important: this timestamp is used by future client synchronisations
-            timestamp,
-            // unused by client:
+            timestamp: now,
             update_urls: changes.add
                 .into_iter()
                 .map(|url| (url.clone(), url))
@@ -498,79 +484,126 @@ impl PodSyncAuthed<true> {
         })
     }
 
-    pub async fn episodes(&self, query: QuerySince)
-        -> Result<EpisodeChanges>
+    pub async fn episodes(&self, since: Timestamp)
+        -> Result<Episodes>
     {
-        // podcast, episode, action, timestamp?, guid?, ...{started,position,total}?
-        println!("episodes GET for {} since {query:?}", self.username);
-
-        // TODO
-        // let result = query_as!(
-        //     EpisodeChangeRaw,
-        //     "
-        //     SELECT podcast, episode, timestamp, guid, action, started, position, total
-        //     FROM episodes
-        //     WHERE username = ?
-        //     ",
-        //     username,
-        // )
-        //     .fetch_all(&*db)
-        //     .await;
-
-        Ok(EpisodeChanges::empty_at(0))
-    }
-
-    pub async fn update_episodes(&self, body: Vec<EpisodeChangeWithDevice>)
-        -> Result<UpdatedUrls>
-    {
-        // podcast, episode, guid: optional
-        println!("episodes POST for {}", self.username);
-
         let username = &self.username;
 
-        self.transact(|mut tx| async move {
-            for EpisodeChangeWithDevice { change, device } in body {
-                println!("updating: {change:?} device={device}");
+        trace!("{username}, requesting episode changes since {since}");
 
-                let EpisodeChangeRaw {
-                    podcast, episode, timestamp, guid,
+        let episodes = query_as!(
+            EpisodeRaw,
+            r#"
+            SELECT podcast, episode,
+                guid, device,
+                timestamp as "timestamp: _",
+                action as "action!: _",
+                started, position, total,
+                modified as "modified?: _"
+            FROM episodes
+            WHERE username = ?
+                AND modified > ?
+            "#,
+            username,
+            since,
+        )
+            .fetch_all(&self.sync.0)
+            .await
+            .map_err(|e| {
+                error!("error selecting episodes: {e:?}");
+                Error::Internal
+            })?;
+
+        let latest = episodes
+            .iter()
+            .filter_map(|ep| ep.modified)
+            .max();
+
+        let episodes = episodes
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<result::Result<Vec<_>, _>>()
+            .map_err(|e| {
+                error!("couldn't construct episode changes from DB: {e:?}");
+                Error::Internal
+            })?;
+
+        Ok(Episodes {
+            timestamp: latest.unwrap_or_default(),
+            actions: episodes,
+        })
+    }
+
+    pub async fn update_episodes(&self, body: Vec<Episode>)
+        -> Result<UpdatedUrls>
+    {
+        let username = &self.username;
+
+        trace!("episode update for {username}");
+
+        let changes = body
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<result::Result<Vec<Episode>, _>>()
+            .map_err(|e| {
+                error!("couldn't construct episode changes from user: {e:?}");
+                Error::BadRequest
+            })?;
+
+        let now = now()?;
+
+        self.transact(|mut tx| async {
+            for change in changes {
+                let EpisodeRaw {
+                    podcast, episode,
+                    timestamp, guid,
                     action, started, position, total,
+                    device, modified: _,
                 } = change.into();
 
                 query!(
                     "
                     INSERT INTO episodes
                     (
-                        username, device, podcast,
-                        episode, timestamp, guid,
+                        username, device,
+                        podcast, episode,
+                        timestamp, guid,
                         action,
-                        started, position, total
+                        started, position, total,
+                        modified
                     )
                     VALUES
                     (
-                        ?, ?, ?,
-                        ?, ?, ?,
+                        ?, ?,
+                        ?, ?,
+                        ?, ?,
                         ?,
-                        ?, ?, ?
+                        ?, ?, ?,
+                        ?
                     )
-                    ON CONFLICT (username, device, podcast, episode)
+                    ON CONFLICT
                     DO
                         UPDATE SET
-                            timestamp = ?,
-                            guid = ?,
-                            action = ?,
-                            started = ?,
-                            position = ?,
-                            total = ?
+                            timestamp = coalesce(?, episodes.timestamp),
+                            guid = coalesce(?, episodes.guid),
+                            action = coalesce(?, episodes.action),
+                            started = coalesce(?, episodes.started),
+                            position = coalesce(?, episodes.position),
+                            total = coalesce(?, episodes.total),
+                            modified = ?
                     ",
-                    username, device, podcast,
-                    episode, timestamp, guid,
-                    action,
-                    started, position, total,
-                    //
+                    // values
+                    username, device,
+                    podcast, episode,
                     timestamp, guid,
                     action,
-                    started, position, total
+                    started, position, total,
+                    now,
+                    // update
+                    timestamp, guid,
+                    action,
+                    started, position, total,
+                    now,
                 )
                     .execute(&mut tx)
                     .await
@@ -583,9 +616,19 @@ impl PodSyncAuthed<true> {
             Ok((tx, ()))
         }).await?;
 
-        Ok(UpdatedUrls { // FIXME: rename struct
-            timestamp: 0, // FIXME: timestamping
-            update_urls: vec![], // unused by client
-        })
+        Ok(UpdatedUrls::just_timestamp(Timestamp::default()))
+    }
+}
+
+fn now() -> Result<Timestamp> {
+    Timestamp::now().map_err(|()| Error::Internal)
+}
+
+impl UpdatedUrls {
+    pub fn just_timestamp(timestamp: Timestamp) -> Self {
+        Self {
+            timestamp,
+            update_urls: Default::default(),
+        }
     }
 }

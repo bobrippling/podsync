@@ -1,5 +1,6 @@
 use std::fmt;
 
+use log::error;
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
@@ -8,6 +9,22 @@ use serde::{Serialize, Deserialize};
 #[derive(sqlx::Type)]
 #[sqlx(transparent)]
 pub struct Timestamp(i64);
+
+impl Timestamp {
+    pub fn now() -> Result<Self, ()> {
+        use std::time::SystemTime;
+
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|duration| {
+                duration.as_secs() as i64
+            })
+            .map(Self)
+            .map_err(|e| {
+                error!("couldn't get time: {e:?}");
+            })
+    }
+}
 
 impl Default for Timestamp {
     fn default() -> Self {

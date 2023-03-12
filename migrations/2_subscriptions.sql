@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 	device TEXT NOT NULL,
 
 	url TEXT NOT NULL,
+
+	-- metadata
 	created INTEGER NOT NULL, -- timestamp
 	deleted INTEGER, -- timestamp, if null, subscription is active
 
