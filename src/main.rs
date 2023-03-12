@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc};
+use std::{future::Future, sync::Arc, net::TcpListener};
 
 use ::time::{ext::NumericalDuration, OffsetDateTime};
 use cookie::{Cookie, SameSite};
@@ -279,7 +279,8 @@ async fn main() {
             );
         }));
 
-    warp::serve(routes).run(args.addr()).await;
+    let incoming = TcpListener::bind(&args.addrs()[..]).unwrap().incoming();
+    warp::serve(routes).run_incoming(incoming).await;
 }
 
 async fn result_to_json<F, B>(f: F) -> impl warp::Reply

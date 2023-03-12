@@ -1,3 +1,5 @@
+use std::net::{ToSocketAddrs, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -18,12 +20,20 @@ pub struct Args {
 }
 
 impl Args {
-    pub fn addr(&self) -> impl Into<std::net::SocketAddr> {
-        if self.any_address {
-            ([0, 0, 0, 0], self.port)
+    pub fn addrs(&self) -> Vec<SocketAddr> {
+        let hosts = if self.any_address {
+            [
+                IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+                IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
+            ]
         } else {
-            ([127, 0, 0, 1], self.port)
-        }
+            [
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+            ]
+        };
+
+        hosts.into_iter().map(|addr| (addr, self.port).into()).collect::<Vec<SocketAddr>>()
     }
 
     pub fn secure(&self) -> bool {
