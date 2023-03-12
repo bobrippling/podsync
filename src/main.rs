@@ -202,14 +202,14 @@ async fn main() {
     let episodes = {
         let get = warp::path!("api" / "2" / "episodes" / String)
             .and(warp::get())
-            .and(warp::query()) // TODO: ?aggregated=true (uniq on (sub, episode))
+            .and(warp::query())
             .and(auth_check.clone())
-            .then(move |username_format: String, query: QuerySince, podsync: PodSyncAuthed| {
+            .then(move |username_format: String, query: podsync::QueryEpisodes, podsync: PodSyncAuthed| {
                 result_to_json(async move {
                     let username = split_format_json(&username_format)?;
 
                     podsync.with_user(&username)?
-                        .episodes(query.since)
+                        .episodes(query)
                         .await
                 })
             });

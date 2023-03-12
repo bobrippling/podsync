@@ -7,7 +7,7 @@ use std::{
 
 use sqlx::{Pool, Sqlite, Transaction, query, query_as};
 use warp::http;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use log::{error, trace};
 
 use crate::auth::{AuthAttempt, SessionId};
@@ -31,6 +31,15 @@ pub struct UpdatedUrls {
     timestamp: Timestamp,
     // unused by antennapod
     update_urls: Vec<(String, String)>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct QueryEpisodes {
+    since: Option<Timestamp>,
+    #[allow(dead_code)]
+    aggregated: Option<bool>,
+    podcast: Option<String>,
+    device: Option<String>,
 }
 
 #[derive(Debug)]
@@ -500,26 +509,40 @@ impl PodSyncAuthed<true> {
         })
     }
 
-    pub async fn episodes(&self, since: Timestamp)
+    pub async fn episodes(&self, query: QueryEpisodes)
         -> Result<Episodes>
     {
         let username = &self.username;
+        let since = query.since.unwrap_or_default();
+        let podcast_filter = query.podcast;
+        let device_filter = query.device;
+        // query.aggregated: unique on (sub, episode)-tuple - always true with how we store
 
-        trace!("{username}, requesting episode changes since {since}");
+        trace!(
+            "{username}, requesting episode changes since {since}, device={}, podcast={}",
+            device_filter.as_deref().unwrap_or("<none>"),
+            podcast_filter.as_deref().unwrap_or("<none>"),
+        );
 
         let episodes = query_as!(
             EpisodeRaw,
             r#"
-            SELECT podcast, episode,
-                guid, device,
+            SELECT episodes.podcast, episode,
+                guid, episodes.device,
                 timestamp as "timestamp: _",
                 action as "action!: _",
                 started, position, total,
                 modified as "modified?: _"
-            FROM episodes
+            FROM
+                episodes,
+                (SELECT ? as podcast, ? as device) as filter
             WHERE username = ?
                 AND modified > ?
+                AND (filter.podcast IS NULL OR filter.podcast = episodes.podcast)
+                AND (filter.device IS NULL OR filter.device = episodes.device)
             "#,
+            podcast_filter,
+            device_filter,
             username,
             since,
         )
