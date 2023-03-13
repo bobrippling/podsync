@@ -1,0 +1,68 @@
+#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:		podsync
+# Required-Start:
+# Required-Stop:
+# Default-Start:	2 3 4 5
+# Default-Stop:
+# Short-Description: podsync service
+### END INIT INFO
+
+. /lib/lsb/init-functions
+
+ADDR=::1
+PORT=80
+FLAGS=
+DIR=/var/run/podsync
+if test -r /etc/default/podsync; then
+	. /etc/default/podsync
+fi
+
+binary=/usr/local/bin/podsync
+
+status(){
+	status_of_proc "podsync" "podsync service" && exit 0 || exit $?
+}
+
+start(){
+	RUST_LOG=podsync=info \
+	start-stop-daemon --exec "$binary" --start --chuid www-data:www-data \
+		--background --output /var/log/podsync.log \
+		--chdir "$DIR" \
+		-- \
+		--address "$ADDR" --port "$PORT" $FLAGS
+}
+
+stop(){
+	start-stop-daemon --exec "$binary" --stop --user www-data
+}
+
+setup(){
+	mkdir -p "$DIR"
+	chown www-data:www-data "$DIR"
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		echo "$0: stopping..."
+		stop
+		echo "$0: starting..."
+		start
+		;;
+	status)
+		status
+		;;
+	setup)
+		setup
+		;;
+	*)
+		usage
+		;;
+esac
