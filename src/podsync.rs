@@ -677,7 +677,10 @@ impl PodSyncAuthed<true> {
 }
 
 fn now() -> Result<Timestamp> {
-    Timestamp::now().map_err(|()| Error::Internal)
+    Timestamp::now().map_err(|e| {
+        error!("couldn't get time: {e:?}");
+        Error::Internal
+    })
 }
 
 impl UpdatedUrls {
