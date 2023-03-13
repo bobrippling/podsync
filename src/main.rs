@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc};
 
-use ::time::{ext::NumericalDuration, OffsetDateTime};
+use ::time::ext::NumericalDuration;
 use cookie::{Cookie, SameSite};
 use serde::{Deserialize, Serialize};
 use warp::{
@@ -14,7 +14,7 @@ use warp::{
 
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 
-use log::info;
+use log::{error, info};
 
 mod auth;
 use auth::{BasicAuth, SessionId};
@@ -31,6 +31,7 @@ mod podsync;
 use podsync::{PodSync, PodSyncAuthed};
 
 mod time;
+use crate::time::Timestamp;
 
 mod path_format;
 use path_format::split_format_json;
@@ -246,7 +247,6 @@ async fn main() {
         .or(subscriptions)
         .or(episodes)
         .with(warp::log::custom(|info| {
-            use ::time::format_description::well_known::Rfc3339;
             use std::fmt::*;
 
             struct OptFmt<T>(Option<T>);
@@ -260,15 +260,19 @@ async fn main() {
                 }
             }
 
-            let now = OffsetDateTime::now_local()
-                .ok()
-                .and_then(|now| now.format(&Rfc3339).ok());
+            let now = Timestamp::now();
 
             info!(
                 target: "podsync::warp",
                 "{} {} \"{} {} {:?}\" {} \"{}\" \"{}\" {:?}",
                 OptFmt(info.remote_addr()),
-                now.as_deref().unwrap_or("<notime>"),
+                match now {
+                    Ok(t) => t.to_string(),
+                    Err(e) => {
+                        error!("couldn't get time: {e:?}");
+                        "<notime>".into()
+                    }
+                },
                 info.method(),
                 info.path(),
                 info.version(),
