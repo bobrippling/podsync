@@ -50,7 +50,7 @@ To update the schema:
 ```sh
 export DATABASE_URL=sqlite://pod.sql
 cargo install sqlx-cli
-cargo sqlx prepare
+cargo sqlx prepare -- --tests
 git commit -m 'Update sqlx snapshot' sqlx-data.json
 ```
 

@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use super::{action::TimePrimitive, time::Time, EpisodeAction, EpisodeActionRaw};
 use crate::time::Timestamp;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde_with::skip_serializing_none]
 #[derive(Deserialize, Serialize)]
 #[serde(try_from = "EpisodeRaw", into = "EpisodeRaw")]
@@ -14,6 +15,19 @@ pub struct Episode {
     pub guid: Option<String>,
     pub action: EpisodeAction,
     pub device: Option<String>, // optional on from-client, not present on to-client
+}
+
+impl Episode {
+    pub fn hash(&self) -> String {
+        use std::{
+            collections::hash_map::DefaultHasher,
+            hash::{Hash, Hasher},
+        };
+
+        let mut hasher = DefaultHasher::new();
+        Hash::hash(self, &mut hasher);
+        hasher.finish().to_string()
+    }
 }
 
 #[derive(Debug)]

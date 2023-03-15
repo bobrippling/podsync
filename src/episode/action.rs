@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub type TimePrimitive = i64;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum EpisodeAction {
     New,
     Download,
