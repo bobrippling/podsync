@@ -389,8 +389,11 @@ impl PodSyncAuthed<true> {
         let created: Vec<_> = created.into_iter().map(E::url).collect();
         let deleted: Vec<_> = deleted.into_iter().map(E::url).collect();
 
+        let now = now()?;
+        let timestamp = latest.unwrap_or(now);
+
         info!(
-            "{username} on {device_id}, {} subs created, {} deleted",
+            "{username} on {device_id}, {} subs created, {} deleted, timestamp {timestamp}",
             created.len(),
             deleted.len(),
         );
@@ -398,7 +401,7 @@ impl PodSyncAuthed<true> {
         Ok(SubscriptionChangesToClient {
             add: created,
             remove: deleted,
-            timestamp: latest.unwrap_or_default(),
+            timestamp,
         })
     }
 
@@ -486,7 +489,7 @@ impl PodSyncAuthed<true> {
         .await?;
 
         info!(
-            "{username} on {device_id}, added {} subscriptions, removed {}",
+            "{username} on {device_id}, added {} subscriptions, removed {}, timestamp {now}",
             changes.add.len(),
             changes.remove.len()
         );
@@ -503,7 +506,7 @@ impl PodSyncAuthed<true> {
 
     pub async fn episodes(&self, query: QueryEpisodes) -> Result<Episodes> {
         let username = &self.username;
-        let since = query.since.unwrap_or_default();
+        let since = query.since.unwrap_or_else(Timestamp::zero);
         let podcast_filter = query.podcast;
         let device_filter = query.device;
         // query.aggregated: unique on (sub, episode)-tuple - always true with how we store
@@ -561,9 +564,10 @@ impl PodSyncAuthed<true> {
             }
         }
 
-        let timestamp = latest.unwrap_or_default();
+        let now = now()?;
+        let timestamp = latest.unwrap_or(now);
         info!(
-            "{username}, {} episodes changes, latest: {timestamp}",
+            "{username}, {} episodes changes, timestamp {timestamp}",
             episodes.len()
         );
 
@@ -677,9 +681,10 @@ impl PodSyncAuthed<true> {
         })
         .await?;
 
-        info!("{username} updated {change_count} episodes");
+        info!("{username} updated {change_count} episodes, timestamp {now}");
 
-        Ok(UpdatedUrls::just_timestamp(Timestamp::default()))
+        let update_timestamp = now;
+        Ok(UpdatedUrls::just_timestamp(update_timestamp))
     }
 }
 

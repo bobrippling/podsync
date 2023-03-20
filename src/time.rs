@@ -28,10 +28,8 @@ impl Timestamp {
     pub fn from_i64(i: i64) -> Self {
         Self(i)
     }
-}
 
-impl Default for Timestamp {
-    fn default() -> Self {
+    pub fn zero() -> Self {
         Self(0)
     }
 }
