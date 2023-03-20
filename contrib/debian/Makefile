@@ -1,16 +1,19 @@
 ROOT = ../..
 TARGET = release
-
-# strip -s <target> -o <out>
-# can be used for debug builds without debug info
+BIN_ROOT = ${ROOT}/target/${TARGET}
 
 install: \
 	/usr/local/bin/podsync \
 	/etc/init.d/podsync \
 	/etc/logrotate.d/podsync
 
-/usr/local/bin/podsync: ${ROOT}/target/${TARGET}/podsync
+stripped: ${BIN_ROOT}/podsync.stripped
+
+/usr/local/bin/podsync: ${BIN_ROOT}/podsync.stripped
 	install -o0 -g0 -m755 "$<" "$@"
+
+${BIN_ROOT}/podsync.stripped: ${BIN_ROOT}/podsync
+	strip -s "$<" -o "$@"
 
 /etc/init.d/podsync: ${ROOT}/contrib/debian/podsync
 	install -o0 -g0 -m755 "$<" "$@"
@@ -24,4 +27,4 @@ uninstall:
 		/etc/init.d/podsync \
 		/etc/logrotate.d/podsync
 
-.PHONY: install
+.PHONY: install stripped
