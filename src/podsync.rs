@@ -709,9 +709,7 @@ mod test {
     use crate::episode::{EpisodeAction, Time};
 
     async fn create_db() -> Pool<Sqlite> {
-        let url = "test.sql";
-
-        std::fs::remove_file(url).unwrap();
+        let url = ":memory:";
 
         Sqlite::create_database(url).await.unwrap();
 
