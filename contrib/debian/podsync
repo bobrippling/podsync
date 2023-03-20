@@ -28,7 +28,7 @@ status(){
 start(){
 	RUST_LOG=podsync=info \
 	start-stop-daemon --exec "$binary" --start --chuid www-data:www-data \
-		--background --output /var/log/podsync.log \
+		--background --output /var/log/podsync/podsync.log \
 		--chdir "$DIR" \
 		-- \
 		--address "$ADDR" --port "$PORT" $FLAGS
