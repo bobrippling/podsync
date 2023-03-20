@@ -12,7 +12,7 @@ pub struct Args {
     /// The address podsync should listen on. By default
     /// podsync will listen just on the IPv4 loopback.
     #[arg(short, long)]
-    address: String,
+    address: Option<String>,
 
     /// The port podsync listens on.
     #[arg(short, long, default_value_t = 80)]
@@ -22,6 +22,8 @@ pub struct Args {
 impl Args {
     pub fn addr(&self) -> Result<SocketAddr, AddrParseError> {
         self.address
+            .as_deref()
+            .unwrap_or("127.0.0.1")
             .parse()
             .map(|addr: IpAddr| (addr, self.port).into())
     }
