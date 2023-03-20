@@ -80,16 +80,6 @@
     },
     "query": "\n                    UPDATE subscriptions\n                    SET\n                        deleted = ?\n                    WHERE username = ?\n                        AND device = ?\n                        AND url = ?\n                        AND deleted IS NULL\n                    "
   },
-  "49d2a76b5641069f59e4e24d32fd5830d2b4c26f82b90e0078e576d787317b0a": {
-    "describe": {
-      "columns": [],
-      "nullable": [],
-      "parameters": {
-        "Right": 18
-      }
-    },
-    "query": "\n                    INSERT INTO episodes\n                    (\n                        username, device,\n                        podcast, episode,\n                        timestamp, guid,\n                        action,\n                        started, position, total,\n                        modified\n                    )\n                    VALUES\n                    (\n                        ?, ?,\n                        ?, ?,\n                        ?, ?,\n                        ?,\n                        ?, ?, ?,\n                        ?\n                    )\n                    ON CONFLICT\n                    DO\n                        UPDATE SET\n                            timestamp = coalesce(?, episodes.timestamp),\n                            guid = coalesce(?, episodes.guid),\n                            action = coalesce(?, episodes.action),\n                            started = coalesce(?, episodes.started),\n                            position = coalesce(?, episodes.position),\n                            total = coalesce(?, episodes.total),\n                            modified = ?\n                    "
-  },
   "4a1e8d47d3e4934dc2d652725ca1adb882ed387bf6565d6d27f5392ab6b77560": {
     "describe": {
       "columns": [],
@@ -172,6 +162,50 @@
     },
     "query": "\n            SELECT episodes.podcast, episode,\n                guid, episodes.device,\n                timestamp as \"timestamp: _\",\n                action as \"action!: _\",\n                started, position, total,\n                modified as \"modified?: _\"\n            FROM\n                episodes,\n                (SELECT ? as podcast, ? as device) as filter\n            WHERE username = ?\n                AND modified > ?\n                AND (filter.podcast IS NULL OR filter.podcast = episodes.podcast)\n                AND (filter.device IS NULL OR filter.device = episodes.device)\n            "
   },
+  "5b0366048dc4ec797b64826150a81df48540307e98d91d8d84d4045b7f7da76f": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "UPDATE episodes SET modified = 23 WHERE username = ?"
+  },
+  "71f499aa1de930510305158864820865a904805b9a7ef74533859d320884f3eb": {
+    "describe": {
+      "columns": [
+        {
+          "name": "modified: _",
+          "ordinal": 0,
+          "type_info": "Int64"
+        },
+        {
+          "name": "hash!: _",
+          "ordinal": 1,
+          "type_info": "Text"
+        }
+      ],
+      "nullable": [
+        false,
+        true
+      ],
+      "parameters": {
+        "Right": 0
+      }
+    },
+    "query": "\n                SELECT modified as \"modified: _\", content_hash as \"hash!: _\"\n                FROM episodes\n                WHERE username = \"u2\"\n                "
+  },
+  "7ebf96081846963d9a88543df229c8cb687b65d2c1f8ce7285f70324b5a3e0c6": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 4
+      }
+    },
+    "query": "\n            INSERT INTO episodes\n            (\n                username, device,\n                podcast, episode,\n                timestamp, guid,\n                action,\n                started, position, total,\n                modified\n            )\n            VALUES\n            (\n                ?, ?,\n                ?, ?,\n                NULL, NULL,\n                \"New\",\n                NULL, NULL, NULL,\n                1 -- `modified` value we expect to be overwritten\n                -- `hash` is defaulted to \"\"\n            ),\n            (\n                \"u2\", \"dev2\", -- this row won't be picked up - different user\n                \"pod2\", \"ep2\",\n                NULL, NULL,\n                \"New\",\n                NULL, NULL, NULL,\n                2\n            )\n        "
+  },
   "90be6c101c11fa3847d2a2f7e1f70a7e9d2e686945c12e7382c832f989fce687": {
     "describe": {
       "columns": [
@@ -199,7 +233,7 @@
       "nullable": [
         false,
         true,
-        true,
+        false,
         null
       ],
       "parameters": {
@@ -207,6 +241,16 @@
       }
     },
     "query": "\n            SELECT id, caption as \"caption!: _\", type as \"type!: _\", COUNT(*) as \"subscriptions!: _\"\n            FROM devices\n            INNER JOIN subscriptions\n                ON devices.username = subscriptions.username\n            GROUP BY devices.username, devices.id\n            HAVING devices.username = ?\n            "
+  },
+  "91fec3ed5f2965fc18eda1d7f9fea8dbff81d91b9e15b055914c5e6a063cb21e": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 20
+      }
+    },
+    "query": "\n                    INSERT INTO episodes\n                    (\n                        username, device,\n                        podcast, episode,\n                        timestamp, guid,\n                        action,\n                        started, position, total,\n                        modified\n                    )\n                    VALUES\n                    (\n                        ?, ?,\n                        ?, ?,\n                        ?, ?,\n                        ?,\n                        ?, ?, ?,\n                        ?\n                    )\n                    ON CONFLICT\n                    DO\n                        UPDATE SET\n                            timestamp = coalesce(?, episodes.timestamp),\n                            guid = coalesce(?, episodes.guid),\n                            action = coalesce(?, episodes.action),\n                            started = coalesce(?, episodes.started),\n                            position = coalesce(?, episodes.position),\n                            total = coalesce(?, episodes.total),\n                            modified = ?,\n                            content_hash = ?\n                        -- only update if we've changed the contents\n                        WHERE content_hash <> ?\n                    "
   },
   "9e6dec71348701a9b6f9fc4b848aad31d654d1ff7c42cb49f4155cad1866618c": {
     "describe": {
@@ -257,5 +301,29 @@
       }
     },
     "query": "\n            SELECT *\n            FROM users\n            WHERE session_id = ?\n            "
+  },
+  "f468a7c32b46ff9a0c5013b14d8d0a579195f763d8180ab604aac67569006853": {
+    "describe": {
+      "columns": [
+        {
+          "name": "modified: _",
+          "ordinal": 0,
+          "type_info": "Int64"
+        },
+        {
+          "name": "hash!: _",
+          "ordinal": 1,
+          "type_info": "Text"
+        }
+      ],
+      "nullable": [
+        false,
+        true
+      ],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "\n                SELECT modified as \"modified: _\", content_hash as \"hash!: _\"\n                FROM episodes\n                WHERE username = ?\n                "
   }
 }

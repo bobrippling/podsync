@@ -1,5 +1,4 @@
-use std::str::FromStr;
-use std::{future::Future, result, sync::Arc};
+use std::{future::Future, result, str::FromStr, sync::Arc};
 
 use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
@@ -593,6 +592,8 @@ impl PodSyncAuthed<true> {
 
         self.transact(|mut tx| async {
             for change in changes {
+                let hash = change.hash();
+
                 let EpisodeRaw {
                     podcast,
                     episode,
@@ -635,7 +636,10 @@ impl PodSyncAuthed<true> {
                             started = coalesce(?, episodes.started),
                             position = coalesce(?, episodes.position),
                             total = coalesce(?, episodes.total),
-                            modified = ?
+                            modified = ?,
+                            content_hash = ?
+                        -- only update if we've changed the contents
+                        WHERE content_hash <> ?
                     ",
                     // values
                     username,
@@ -657,6 +661,9 @@ impl PodSyncAuthed<true> {
                     position,
                     total,
                     now,
+                    hash,
+                    // update where
+                    hash,
                 )
                 .execute(&mut tx)
                 .await
@@ -688,6 +695,203 @@ impl UpdatedUrls {
         Self {
             timestamp,
             update_urls: Default::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use sqlx::{migrate::MigrateDatabase, SqlitePool};
+    use uuid::Uuid;
+
+    use crate::episode::{EpisodeAction, Time};
+
+    async fn create_db() -> Pool<Sqlite> {
+        let url = ":memory:";
+
+        Sqlite::create_database(url).await.unwrap();
+
+        let db = SqlitePool::connect(url).await.unwrap();
+
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
+
+        db
+    }
+
+    fn create_session() -> SessionId {
+        Uuid::try_parse("550e8400-e29b-41d4-a716-446655440000")
+            .unwrap()
+            .into()
+    }
+
+    async fn create_podsync(username: &str) -> PodSyncAuthed<true> {
+        let db = create_db().await;
+        let podsync = Arc::new(PodSync(db));
+        PodSyncAuthed {
+            sync: podsync,
+            session_id: create_session(),
+            username: username.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn episode_hashing() {
+        let username = "user1";
+        let podcast = "pod1";
+        let episode = "ep1";
+        let device = "dev1";
+
+        let podsync = create_podsync(username).await;
+
+        // given an "old" episode:
+        query!(
+            r#"
+            INSERT INTO episodes
+            (
+                username, device,
+                podcast, episode,
+                timestamp, guid,
+                action,
+                started, position, total,
+                modified
+            )
+            VALUES
+            (
+                ?, ?,
+                ?, ?,
+                NULL, NULL,
+                "New",
+                NULL, NULL, NULL,
+                1 -- `modified` value we expect to be overwritten
+                -- `hash` is defaulted to ""
+            ),
+            (
+                "u2", "dev2", -- this row won't be picked up - different user
+                "pod2", "ep2",
+                NULL, NULL,
+                "New",
+                NULL, NULL, NULL,
+                2
+            )
+        "#,
+            username,
+            device,
+            podcast,
+            episode,
+        )
+        .execute(&podsync.sync.0)
+        .await
+        .unwrap();
+
+        // when we get a change to it:
+        let change = Episode {
+            podcast: podcast.into(),
+            episode: episode.into(),
+            device: None,
+            timestamp: None,
+            guid: None,
+            action: EpisodeAction::New,
+        };
+        podsync.update_episodes(vec![change.clone()]).await.unwrap();
+
+        // then we expect an update to specific fields:
+        {
+            let Episodes { actions: eps, .. } = podsync
+                .episodes(QueryEpisodes {
+                    since: None,
+                    aggregated: None,
+                    podcast: None,
+                    device: None,
+                })
+                .await
+                .unwrap();
+
+            let [ref ep] = eps[..] else { panic!("expected single episode") };
+
+            assert_eq!(
+                ep,
+                &Episode {
+                    podcast: podcast.into(),
+                    episode: episode.into(),
+                    device: Some(device.into()),
+                    timestamp: Some(Time::from_i64(0)),
+                    guid: None,
+                    action: EpisodeAction::New,
+                }
+            );
+        }
+
+        struct SmallEp {
+            modified: Timestamp,
+            hash: String,
+        }
+        let query_episodes = || async {
+            query_as!(
+                SmallEp,
+                r#"
+                SELECT modified as "modified: _", content_hash as "hash!: _"
+                FROM episodes
+                WHERE username = ?
+                "#,
+                username
+            )
+            .fetch_all(&podsync.sync.0)
+            .await
+            .unwrap()
+        };
+
+        // and our modified timestamp to have changed, along with the hash:
+        let new_hash;
+        {
+            let episodes = query_episodes().await;
+            let [SmallEp { ref modified, ref hash }] = episodes[..] else { panic!("expected single episode") };
+
+            assert_eq!(modified, &Timestamp::now().unwrap());
+            assert!(hash.len() > 0); // default is ""
+
+            new_hash = hash.clone();
+        }
+
+        // but the same update will not change the modified field, nor the hash
+        {
+            // knock the modified field back away from now():
+            query!(
+                "UPDATE episodes SET modified = 23 WHERE username = ?",
+                username
+            )
+            .execute(&podsync.sync.0)
+            .await
+            .unwrap();
+
+            podsync.update_episodes(vec![change.clone()]).await.unwrap();
+
+            let episodes = query_episodes().await;
+            let [SmallEp { ref modified, ref hash }] = episodes[..] else { panic!("expected single episode") };
+
+            assert_eq!(modified, &Timestamp::from_i64(23));
+            assert_eq!(hash, &new_hash);
+        }
+
+        // and the other rows are unaffected:
+        {
+            let episodes = query_as!(
+                SmallEp,
+                r#"
+                SELECT modified as "modified: _", content_hash as "hash!: _"
+                FROM episodes
+                WHERE username = "u2"
+                "#
+            )
+            .fetch_all(&podsync.sync.0)
+            .await
+            .unwrap();
+
+            let [SmallEp { ref modified, ref hash }] = episodes[..] else { panic!("expected single episode") };
+
+            assert_eq!(modified, &Timestamp::from_i64(2));
+            assert_eq!(hash, "");
         }
     }
 }

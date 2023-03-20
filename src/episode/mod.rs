@@ -8,3 +8,5 @@ mod episode;
 pub use episode::{Episode, EpisodeRaw};
 
 mod time;
+#[cfg(test)]
+pub use self::time::Time;

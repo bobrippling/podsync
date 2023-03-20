@@ -6,7 +6,9 @@ use time::{
 
 // this struct exists to work around #[serde(with = ...)]
 // not handling Option for us
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Hash)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+#[derive(Deserialize, Serialize)]
 #[serde(transparent)]
 #[derive(sqlx::Type)]
 #[sqlx(transparent)]
@@ -15,6 +17,18 @@ pub struct Time(#[serde(with = "time_no_offset")] PrimitiveDateTime);
 impl Default for Time {
     fn default() -> Self {
         let dt = PrimitiveDateTime::new(date!(1970 - 01 - 01), time!(0:00));
+        Self(dt)
+    }
+}
+
+impl Time {
+    #[cfg(test)]
+    pub fn from_i64(i: i64) -> Self {
+        use time::Time;
+        let dt = PrimitiveDateTime::new(
+            date!(1970 - 01 - 01),
+            Time::from_hms(0, 0, i.try_into().unwrap()).unwrap(),
+        );
         Self(dt)
     }
 }
