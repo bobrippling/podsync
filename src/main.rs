@@ -71,21 +71,6 @@ async fn main() {
     let secure = args.secure();
     let podsync = Arc::new(PodSync::new(db));
 
-    let auth_check = warp::cookie(COOKIE_NAME).and_then({
-        let podsync = Arc::clone(&podsync);
-
-        move |session_id: SessionId| {
-            let podsync = Arc::clone(&podsync);
-
-            async move {
-                podsync
-                    .authenticate(session_id)
-                    .await
-                    .map_err(warp::reject::custom)
-            }
-        }
-    });
-
     let hello = warp::path::end()
         .and(warp::get())
         .map(|| "PodSync is Working!");
@@ -127,41 +112,41 @@ async fn main() {
             });
 
         let logout = warp::post()
-            .and(warp::path!("api" / "2" / "auth" / String / "logout.json"))
-            .and(auth_check.clone())
-            .then(move |username: String, podsync: PodSyncAuthed| {
-                result_to_ok(async move { podsync.with_user(&username)?.logout().await })
+            .and(warp::path!(
+                "api" / "2" / "auth" / .. /* String / "logout.json" */
+            ))
+            .and(authorize(UsernameFormat::Name, podsync.clone()))
+            .and(warp::path::path("logout.json").and(warp::path::end()))
+            .then(move |podsync: PodSyncAuthed<true>| {
+                result_to_ok(async move { podsync.logout().await })
             });
 
         login.or(logout)
     };
 
     let devices = {
-        let for_user = warp::path!("api" / "2" / "devices" / String)
+        let for_user = warp::path!("api" / "2" / "devices" / .. /* String */)
             .and(warp::get())
-            .and(auth_check.clone())
-            .then(|username_format: String, podsync: PodSyncAuthed| {
+            .and(authorize(UsernameFormat::NameJson, podsync.clone()))
+            .and(warp::path::end())
+            .then(|podsync: PodSyncAuthed<true>| {
                 result_to_json(async move {
-                    let username = split_format_json(&username_format)?;
-
-                    let devs = podsync.with_user(username)?.devices().await?;
+                    let devs = podsync.devices().await?;
 
                     Ok(devs)
                 })
             });
 
-        let update = warp::path!("api" / "2" / "devices" / String / String)
+        let update = warp::path!("api" / "2" / "devices" / .. /* String / String */)
             .and(warp::post())
-            .and(auth_check.clone())
+            .and(authorize(UsernameFormat::Name, podsync.clone()))
+            .and(warp::path::param::<String>().and(warp::path::end()))
             .and(warp::body::json())
             .then(
-                move |username: String, deviceid_format: String, podsync: PodSyncAuthed, device| {
+                move |podsync: PodSyncAuthed<true>, deviceid_format: String, device| {
                     result_to_ok(async move {
                         let device_id = split_format_json(&deviceid_format)?;
-                        podsync
-                            .with_user(&username)?
-                            .update_device(device_id, device)
-                            .await
+                        podsync.update_device(device_id, device).await
                     })
                 },
             );
@@ -170,41 +155,31 @@ async fn main() {
     };
 
     let subscriptions = {
-        let get = warp::path!("api" / "2" / "subscriptions" / String / String)
+        let get = warp::path!("api" / "2" / "subscriptions" / .. /* String / String*/)
             .and(warp::get())
+            .and(authorize(UsernameFormat::Name, podsync.clone()))
+            .and(warp::path::param::<String>().and(warp::path::end()))
             .and(warp::query())
-            .and(auth_check.clone())
             .then(
-                move |username: String,
-                      deviceid_format: String,
-                      query: QuerySince,
-                      podsync: PodSyncAuthed| {
+                move |podsync: PodSyncAuthed<true>, deviceid_format: String, query: QuerySince| {
                     result_to_json(async move {
                         let device_id = split_format_json(&deviceid_format)?;
-                        podsync
-                            .with_user(&username)?
-                            .subscriptions(device_id, query.since)
-                            .await
+                        podsync.subscriptions(device_id, query.since).await
                     })
                 },
             );
 
-        let upload = warp::path!("api" / "2" / "subscriptions" / String / String)
+        let upload = warp::path!("api" / "2" / "subscriptions" / .. /* String / String */)
             .and(warp::post())
-            .and(auth_check.clone())
+            .and(authorize(UsernameFormat::Name, podsync.clone()))
+            .and(warp::path::param::<String>().and(warp::path::end()))
             .and(warp::body::json())
             .then(
-                move |username: String,
-                      deviceid_format: String,
-                      podsync: PodSyncAuthed,
-                      changes| {
+                move |podsync: PodSyncAuthed<true>, deviceid_format: String, changes| {
                     result_to_json(async move {
                         let device_id = split_format_json(&deviceid_format)?;
 
-                        podsync
-                            .with_user(&username)?
-                            .update_subscriptions(device_id, changes)
-                            .await
+                        podsync.update_subscriptions(device_id, changes).await
                     })
                 },
             );
@@ -213,35 +188,25 @@ async fn main() {
     };
 
     let episodes = {
-        let get = warp::path!("api" / "2" / "episodes" / String)
+        let get = warp::path!("api" / "2" / "episodes" / .. /* String */)
             .and(warp::get())
+            .and(authorize(UsernameFormat::NameJson, podsync.clone()))
+            .and(warp::path::end())
             .and(warp::query())
-            .and(auth_check.clone())
             .then(
-                move |username_format: String,
-                      query: podsync::QueryEpisodes,
-                      podsync: PodSyncAuthed| {
-                    result_to_json(async move {
-                        let username = split_format_json(&username_format)?;
-
-                        podsync.with_user(&username)?.episodes(query).await
-                    })
+                move |podsync: PodSyncAuthed<true>, query: podsync::QueryEpisodes| {
+                    result_to_json(async move { podsync.episodes(query).await })
                 },
             );
 
-        let upload = warp::path!("api" / "2" / "episodes" / String)
+        let upload = warp::path!("api" / "2" / "episodes" / .. /* String */)
             .and(warp::post())
-            .and(auth_check.clone())
+            .and(authorize(UsernameFormat::NameJson, podsync.clone()))
+            .and(warp::path::end())
             .and(warp::body::json())
-            .then(
-                move |username_format: String, podsync: PodSyncAuthed, body| {
-                    result_to_json(async move {
-                        let username = split_format_json(&username_format)?;
-
-                        podsync.with_user(&username)?.update_episodes(body).await
-                    })
-                },
-            );
+            .then(move |podsync: PodSyncAuthed<true>, body| {
+                result_to_json(async move { podsync.update_episodes(body).await })
+            });
 
         get.or(upload)
     };
@@ -346,4 +311,76 @@ fn err_to_warp(e: podsync::Error) -> impl warp::Reply {
 #[derive(Debug, Deserialize)]
 pub struct QuerySince {
     since: crate::time::Timestamp,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum UsernameFormat {
+    Name,
+    NameJson,
+}
+impl UsernameFormat {
+    pub fn convert<'a>(&self, username: &'a str) -> Result<&'a str, warp::Rejection> {
+        match self {
+            Self::Name => Ok(username),
+            Self::NameJson => split_format_json(username).map_err(warp::reject::custom),
+        }
+    }
+}
+
+fn cookie_authorize(
+    username_fmt: UsernameFormat,
+    podsync: Arc<PodSync>,
+) -> impl Filter<Extract = (PodSyncAuthed<true>,), Error = warp::Rejection> + Clone {
+    let cookie_auth_check = warp::cookie(COOKIE_NAME).and_then({
+        move |session_id: SessionId| {
+            let podsync = Arc::clone(&podsync);
+
+            async move {
+                podsync
+                    .authenticate(session_id)
+                    .await
+                    .map_err(warp::reject::custom)
+            }
+        }
+    });
+
+    warp::path::param::<String>()
+        .and(cookie_auth_check)
+        .and_then(move |username: String, podsync: PodSyncAuthed| async move {
+            podsync
+                .with_user(username_fmt.convert(&username)?)
+                .map_err(warp::reject::custom)
+        })
+}
+
+fn login_authorize(
+    username_fmt: UsernameFormat,
+    podsync: Arc<PodSync>,
+) -> impl Filter<Extract = (PodSyncAuthed<true>,), Error = warp::Rejection> + Clone {
+    warp::path::param::<String>()
+        .and(warp::header("authorization"))
+        .and(warp::cookie::optional(COOKIE_NAME))
+        .and_then(
+            move |username: String, auth: BasicAuth, session_id: Option<SessionId>| {
+                let podsync = Arc::clone(&podsync);
+                async move {
+                    let username = username_fmt.convert(&username)?;
+                    let auth = auth.with_path_username(&username)?;
+                    podsync
+                        .login(auth, session_id)
+                        .await?
+                        .with_user(&username)
+                        .map_err(warp::reject::custom)
+                }
+            },
+        )
+}
+
+fn authorize(
+    username_fmt: UsernameFormat,
+    podsync: Arc<PodSync>,
+) -> impl Filter<Extract = (PodSyncAuthed<true>,), Error = warp::Rejection> + Clone {
+    cookie_authorize(username_fmt, podsync.clone())
+        .or(login_authorize(username_fmt, podsync.clone()))
+        .unify()
 }
