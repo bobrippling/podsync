@@ -162,7 +162,46 @@ async fn main() {
                 },
             );
 
-        for_user.or(update)
+        let sync = {
+            // https://github.com/gpodder/mygpo/blob/80c41dc0c9a58dc0e85f6ef56662cdfd0d6e3b16/doc/api/reference/sync.rst
+
+            let for_user = warp::path!("api" / "2" / "sync-devices" / String)
+                .and(warp::get())
+                .and(auth_check.clone())
+                .then(|username_format: String, podsync: PodSyncAuthed| {
+                    result_to_json(async move {
+                        let username = split_format_json(&username_format)?;
+
+                        // TODO
+                        // let devs = podsync.with_user(username)?.devices().await?;
+                        Err(podsync::Error::Internal)
+                    })
+                });
+
+            let update = warp::path!("api" / "2" / "sync-devices" / String)
+                .and(warp::post())
+                .and(auth_check.clone())
+                .and(warp::body::json())
+                .then(
+                    move |username_format: String, podsync: PodSyncAuthed, sync_devices| {
+                        result_to_ok(async move {
+                            let username = split_format_json(&username_format)?;
+
+                            // TODO
+                            // {
+                            // synchronize: [],
+                            // stop-synchronize: []
+                            // }
+                            // podsync
+                            //     .with_user(&username)?
+                            //     .sync_devices(sync_devices)
+                            //     .await
+                        })
+                    },
+                );
+        };
+
+        for_user.or(update).or(sync)
     };
 
     let subscriptions = {
