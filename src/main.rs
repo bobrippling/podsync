@@ -366,8 +366,7 @@ fn login_authorize(
                 let auth = auth.with_path_username(&username)?;
                 podsync
                     .login(auth, None)
-                    .await?
-                    .with_user(&username)
+                    .await
                     .map_err(warp::reject::custom)
             }
         })

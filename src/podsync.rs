@@ -67,7 +67,7 @@ impl PodSync {
         self: &Arc<Self>,
         auth_attempt: AuthAttempt,
         client_session_id: Option<SessionId>,
-    ) -> Result<PodSyncAuthed> {
+    ) -> Result<PodSyncAuthed<true>> {
         let username = auth_attempt.user();
 
         let user = query_as!(
@@ -204,10 +204,6 @@ impl PodSync {
 }
 
 impl PodSyncAuthed {
-    pub fn session_id(&self) -> &SessionId {
-        &self.session_id
-    }
-
     pub fn with_user(self, username: &str) -> Result<PodSyncAuthed<true>> {
         if username == self.username {
             Ok(PodSyncAuthed {
@@ -246,6 +242,10 @@ impl PodSyncAuthed<true> {
             error!("error updating session_id: {e:?}");
             Error::Internal
         })
+    }
+
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
     }
 
     pub async fn devices(&self) -> Result<Vec<DeviceAndSub>> {
