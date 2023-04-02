@@ -313,7 +313,7 @@ pub struct QuerySince {
     since: crate::time::Timestamp,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug)]
 enum UsernameFormat {
     Name,
     NameJson,
