@@ -331,25 +331,21 @@ fn cookie_authorize(
     username_fmt: UsernameFormat,
     podsync: Arc<PodSync>,
 ) -> impl Filter<Extract = (PodSyncAuthed<true>,), Error = warp::Rejection> + Clone {
-    let cookie_auth_check = warp::cookie(COOKIE_NAME).and_then({
-        move |session_id: SessionId| {
-            let podsync = Arc::clone(&podsync);
-
-            async move {
-                podsync
-                    .authenticate(session_id)
-                    .await
-                    .map_err(warp::reject::custom)
-            }
-        }
-    });
-
     warp::path::param::<String>()
-        .and(cookie_auth_check)
-        .and_then(move |username: String, podsync: PodSyncAuthed| async move {
-            podsync
-                .with_user(username_fmt.convert(&username)?)
-                .map_err(warp::reject::custom)
+        .and(warp::cookie(COOKIE_NAME))
+        .and_then({
+            move |username: String, session_id: SessionId| {
+                let podsync = Arc::clone(&podsync);
+
+                async move {
+                    podsync
+                        .authenticate(session_id)
+                        .await
+                        .map_err(warp::reject::custom)?
+                        .with_user(username_fmt.convert(&username)?)
+                        .map_err(warp::reject::custom)
+                }
+            }
         })
 }
 
