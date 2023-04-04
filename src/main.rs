@@ -86,6 +86,10 @@ async fn main() {
         }
     });
 
+    let hello = warp::path::end()
+        .and(warp::get())
+        .map(|| "PodSync is Working!");
+
     let auth = {
         let login = warp::post()
             .and(warp::path!("api" / "2" / "auth" / String / "login.json"))
@@ -242,7 +246,8 @@ async fn main() {
         get.or(upload)
     };
 
-    let routes = auth
+    let routes = hello
+        .or(auth)
         .or(devices)
         .or(subscriptions)
         .or(episodes)
