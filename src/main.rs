@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc};
+use std::{convert::Infallible, future::Future, sync::Arc};
 
 use ::time::ext::NumericalDuration;
 use cookie::{Cookie, SameSite};
@@ -8,8 +8,8 @@ use warp::{
         self,
         header::{HeaderMap, HeaderValue},
     },
-    hyper::Body,
-    Filter, Reply,
+    hyper::{Body, StatusCode},
+    Filter, Rejection, Reply,
 };
 
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
@@ -281,7 +281,8 @@ async fn main() {
                 OptFmt(info.user_agent()),
                 info.elapsed(),
             );
-        }));
+        }))
+        .recover(handle_rejection);
 
     warp::serve(routes)
         .run(args.addr().expect("couldn't parse address"))
@@ -341,4 +342,30 @@ fn err_to_warp(e: podsync::Error) -> impl warp::Reply {
 #[derive(Debug, Deserialize)]
 pub struct QuerySince {
     since: crate::time::Timestamp,
+}
+
+async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
+    #[derive(Serialize)]
+    struct ErrorMessage {
+        code: u16,
+        message: String,
+    }
+
+    let code;
+    let message;
+
+    if let Some(e) = err.find::<podsync::Error>() {
+        code = (*e).into();
+        message = (*e).into();
+    } else {
+        code = StatusCode::INTERNAL_SERVER_ERROR;
+        message = "UNHANDLED_REJECTION";
+    }
+
+    let json = warp::reply::json(&ErrorMessage {
+        code: code.as_u16(),
+        message: message.into(),
+    });
+
+    Ok(warp::reply::with_status(json, code))
 }

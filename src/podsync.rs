@@ -37,7 +37,7 @@ pub struct QueryEpisodes {
     device: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum Error {
     Internal,
     Unauthorized,
@@ -52,6 +52,15 @@ impl Into<http::StatusCode> for Error {
             Self::Internal => http::StatusCode::INTERNAL_SERVER_ERROR,
             Self::Unauthorized => http::StatusCode::UNAUTHORIZED,
             Self::BadRequest => http::StatusCode::BAD_REQUEST,
+        }
+    }
+}
+impl Into<&'static str> for Error {
+    fn into(self) -> &'static str {
+        match self {
+            Self::Internal => "Internal Server Error",
+            Self::Unauthorized => "Unauthorized",
+            Self::BadRequest => "Bad Request",
         }
     }
 }
