@@ -355,17 +355,20 @@ fn login_authorize(
 ) -> impl Filter<Extract = (PodSyncAuthed<true>,), Error = warp::Rejection> + Clone {
     warp::path::param::<String>()
         .and(warp::header("authorization"))
-        .and_then(move |username: String, auth: BasicAuth| {
-            let podsync = Arc::clone(&podsync);
-            async move {
-                let username = username_fmt.convert(&username)?;
-                let auth = auth.with_path_username(&username)?;
-                podsync
-                    .login(auth, None)
-                    .await
-                    .map_err(warp::reject::custom)
-            }
-        })
+        .and(warp::cookie::optional(COOKIE_NAME))
+        .and_then(
+            move |username: String, auth: BasicAuth, session_id: Option<SessionId>| {
+                let podsync = Arc::clone(&podsync);
+                async move {
+                    let username = username_fmt.convert(&username)?;
+                    let auth = auth.with_path_username(&username)?;
+                    podsync
+                        .login(auth, session_id)
+                        .await
+                        .map_err(warp::reject::custom)
+                }
+            },
+        )
 }
 
 fn authorize(
