@@ -424,9 +424,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn login() {
-        pretty_env_logger::init();
-
+    async fn login_session() {
         let db = mock::create_db().await;
 
         // setup bob:abc
@@ -445,19 +443,42 @@ mod test {
 
         let podsync = Arc::new(PodSync::new(db));
         let filter = routes(podsync, true);
+        let bob_auth = format!("Basic {}", base64(&format!("{}:{}", "bob", pass)));
 
         let res = warp::test::request()
             .path("/api/2/auth/bob/login.json")
             .method("POST")
-            .header(
-                "authorization",
-                format!("Basic {}", base64(&format!("{}:{}", "bob", pass))),
-            )
+            .header("authorization", &bob_auth)
             .reply(&filter)
             .await;
 
         assert_eq!(res.status(), 200);
-        let cookie = res.headers().get("set-cookie");
-        assert!(cookie.is_some());
+        let cookie = res.headers().get("set-cookie").expect("session cookie");
+        let cookie = Cookie::parse(cookie.to_str().unwrap()).unwrap();
+
+        assert_eq!(cookie.name(), COOKIE_NAME);
+
+        // a POST to /login with the same auth and a cookie will verify the cookie:
+        let res = warp::test::request()
+            .path("/api/2/auth/bob/login.json")
+            .method("POST")
+            .header("authorization", &bob_auth)
+            .header("cookie", cookie.to_string())
+            .reply(&filter)
+            .await;
+
+        assert_eq!(res.status(), 200);
+
+        // and a POST to /login with the wrong auth will reject:
+        let tim_auth = format!("Basic {}", base64(&format!("{}:{}", "tim", "123")));
+        let res = warp::test::request()
+            .path("/api/2/auth/bob/login.json")
+            .method("POST")
+            .header("authorization", &tim_auth)
+            .header("cookie", cookie.to_string())
+            .reply(&filter)
+            .await;
+
+        assert_eq!(res.status(), 401);
     }
 }
