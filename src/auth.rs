@@ -19,6 +19,10 @@ pub struct AuthAttempt {
 #[derive(PartialEq, Eq)]
 pub struct SessionId(Uuid);
 
+pub fn pwhash(s: &str) -> String {
+    digest(s)
+}
+
 impl BasicAuth {
     pub fn with_path_username(self, username: &str) -> podsync::Result<AuthAttempt> {
         (self.user == username)
@@ -58,7 +62,7 @@ impl AuthAttempt {
     }
 
     pub fn calc_pwhash(&self) -> String {
-        digest(&self.auth.pass[..])
+        pwhash(&self.auth.pass[..])
     }
 }
 

@@ -39,6 +39,9 @@ use path_format::split_format_json;
 mod args;
 use args::Args;
 
+#[cfg(test)]
+mod mock;
+
 static DB_URL: &str = "sqlite://pod.sql";
 static COOKIE_NAME: &str = "sessionid"; // gpodder/mygpo, doc/api/reference/auth.rst:16
 
@@ -76,6 +79,17 @@ async fn main() {
     let secure = args.secure();
     let podsync = Arc::new(PodSync::new(db));
 
+    let routes = routes(podsync, secure).recover(handle_rejection);
+
+    warp::serve(routes)
+        .run(args.addr().expect("couldn't parse address"))
+        .await;
+}
+
+fn routes(
+    podsync: Arc<PodSync>,
+    secure: bool,
+) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
     let hello = warp::path::end()
         .and(warp::get())
         .map(|| "PodSync is Working!");
@@ -93,7 +107,10 @@ async fn main() {
                     result_to_headers(async move {
                         let auth = match auth {
                             Some(auth) => auth.with_path_username(&username),
-                            None => Err(podsync::Error::Unauthorized),
+                            None => {
+                                error!("hi");
+                                Err(podsync::Error::Unauthorized)
+                            }
                         }?;
 
                         let podsync = podsync.login(auth, session_id).await?;
@@ -216,7 +233,7 @@ async fn main() {
         get.or(upload)
     };
 
-    let routes = hello
+    hello
         .or(auth)
         .or(devices)
         .or(subscriptions)
@@ -257,11 +274,6 @@ async fn main() {
                 info.elapsed(),
             );
         }))
-        .recover(handle_rejection);
-
-    warp::serve(routes)
-        .run(args.addr().expect("couldn't parse address"))
-        .await;
 }
 
 async fn result_to_json<F, B>(f: F) -> impl warp::Reply
@@ -385,5 +397,67 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
         Ok(err_to_warp(*err))
     } else {
         Err(err)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use sqlx::query;
+
+    use super::*;
+    use crate::mock;
+    use base64_light::base64_encode as base64;
+
+    #[tokio::test]
+    async fn hello() {
+        let db = mock::create_db().await;
+        let podsync = Arc::new(PodSync::new(db));
+        let filter = routes(podsync, true);
+
+        let res = warp::test::request()
+            .path("/")
+            .method("GET")
+            .reply(&filter)
+            .await;
+
+        assert_eq!(res.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn login() {
+        pretty_env_logger::init();
+
+        let db = mock::create_db().await;
+
+        // setup bob:abc
+        let pass = "abc";
+        let pwhash = auth::pwhash(pass);
+        query!(
+            r#"
+            INSERT INTO users
+            VALUES ("bob", ?, NULL);
+            "#,
+            pwhash,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let podsync = Arc::new(PodSync::new(db));
+        let filter = routes(podsync, true);
+
+        let res = warp::test::request()
+            .path("/api/2/auth/bob/login.json")
+            .method("POST")
+            .header(
+                "authorization",
+                format!("Basic {}", base64(&format!("{}:{}", "bob", pass))),
+            )
+            .reply(&filter)
+            .await;
+
+        assert_eq!(res.status(), 200);
+        let cookie = res.headers().get("set-cookie");
+        assert!(cookie.is_some());
     }
 }

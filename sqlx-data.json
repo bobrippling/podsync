@@ -172,6 +172,16 @@
     },
     "query": "UPDATE episodes SET modified = 23 WHERE username = ?"
   },
+  "6a8d46bd6803e85602f7807594dfd7f815db47a9456d127fee88326b254bd007": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "\n            INSERT INTO users\n            VALUES (\"bob\", ?, NULL);\n            "
+  },
   "71f499aa1de930510305158864820865a904805b9a7ef74533859d320884f3eb": {
     "describe": {
       "columns": [
@@ -188,7 +198,7 @@
       ],
       "nullable": [
         false,
-        true
+        false
       ],
       "parameters": {
         "Right": 0
@@ -318,7 +328,7 @@
       ],
       "nullable": [
         false,
-        true
+        false
       ],
       "parameters": {
         "Right": 1

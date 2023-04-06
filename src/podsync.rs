@@ -708,22 +708,11 @@ impl UpdatedUrls {
 mod test {
     use super::*;
 
-    use sqlx::{migrate::MigrateDatabase, SqlitePool};
     use uuid::Uuid;
 
     use crate::episode::{EpisodeAction, Time};
 
-    async fn create_db() -> Pool<Sqlite> {
-        let url = ":memory:";
-
-        Sqlite::create_database(url).await.unwrap();
-
-        let db = SqlitePool::connect(url).await.unwrap();
-
-        sqlx::migrate!("./migrations").run(&db).await.unwrap();
-
-        db
-    }
+    use crate::mock;
 
     fn create_session() -> SessionId {
         Uuid::try_parse("550e8400-e29b-41d4-a716-446655440000")
@@ -732,7 +721,7 @@ mod test {
     }
 
     async fn create_podsync(username: &str) -> PodSyncAuthed<true> {
-        let db = create_db().await;
+        let db = mock::create_db().await;
         let podsync = Arc::new(PodSync(db));
         PodSyncAuthed {
             sync: podsync,
