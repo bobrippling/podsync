@@ -42,6 +42,11 @@ use args::Args;
 static DB_URL: &str = "sqlite://pod.sql";
 static COOKIE_NAME: &str = "sessionid"; // gpodder/mygpo, doc/api/reference/auth.rst:16
 
+#[derive(Debug, Deserialize)]
+pub struct QuerySince {
+    since: crate::time::Timestamp,
+}
+
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
@@ -309,21 +314,17 @@ fn err_to_warp(e: podsync::Error) -> impl warp::Reply {
     warp::reply::with_status(warp::reply(), e.into())
 }
 
-#[derive(Debug, Deserialize)]
-pub struct QuerySince {
-    since: crate::time::Timestamp,
-}
-
 #[derive(Copy, Clone, Debug)]
 enum UsernameFormat {
     Name,
     NameJson,
 }
+
 impl UsernameFormat {
-    pub fn convert<'a>(&self, username: &'a str) -> Result<&'a str, warp::Rejection> {
+    pub fn convert<'a>(&self, username: &'a str) -> podsync::Result<&'a str> {
         match self {
             Self::Name => Ok(username),
-            Self::NameJson => split_format_json(username).map_err(warp::reject::custom),
+            Self::NameJson => split_format_json(username),
         }
     }
 }
@@ -331,20 +332,19 @@ impl UsernameFormat {
 fn cookie_authorize(
     username_fmt: UsernameFormat,
     podsync: Arc<PodSync>,
-) -> impl Filter<Extract = (PodSyncAuthed<true>,), Error = warp::Rejection> + Clone {
+) -> impl Filter<Extract = (podsync::Result<PodSyncAuthed<true>>,), Error = warp::Rejection> + Clone
+{
     warp::path::param::<String>()
         .and(warp::cookie(COOKIE_NAME))
-        .and_then({
+        .then({
             move |username: String, session_id: SessionId| {
                 let podsync = Arc::clone(&podsync);
 
                 async move {
                     podsync
                         .authenticate(session_id)
-                        .await
-                        .map_err(warp::reject::custom)?
+                        .await?
                         .with_user(username_fmt.convert(&username)?)
-                        .map_err(warp::reject::custom)
                 }
             }
         })
@@ -353,20 +353,18 @@ fn cookie_authorize(
 fn login_authorize(
     username_fmt: UsernameFormat,
     podsync: Arc<PodSync>,
-) -> impl Filter<Extract = (PodSyncAuthed<true>,), Error = warp::Rejection> + Clone {
+) -> impl Filter<Extract = (podsync::Result<PodSyncAuthed<true>>,), Error = warp::Rejection> + Clone
+{
     warp::path::param::<String>()
         .and(warp::header("authorization"))
         .and(warp::cookie::optional(COOKIE_NAME))
-        .and_then(
+        .then(
             move |username: String, auth: BasicAuth, session_id: Option<SessionId>| {
                 let podsync = Arc::clone(&podsync);
                 async move {
                     let username = username_fmt.convert(&username)?;
                     let auth = auth.with_path_username(&username)?;
-                    podsync
-                        .login(auth, session_id)
-                        .await
-                        .map_err(warp::reject::custom)
+                    podsync.login(auth, session_id).await
                 }
             },
         )
@@ -379,6 +377,7 @@ fn authorize(
     cookie_authorize(username_fmt, podsync.clone())
         .or(login_authorize(username_fmt, podsync.clone()))
         .unify()
+        .and_then(|auth: podsync::Result<_>| async move { auth.map_err(warp::reject::custom) })
 }
 
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
