@@ -370,14 +370,14 @@ fn login_authorize(
 {
     warp::path::param::<String>()
         .and(warp::header("authorization"))
-        .and(warp::cookie::optional(COOKIE_NAME))
+        // .and(warp::cookie::optional(COOKIE_NAME))
         .then(
-            move |username: String, auth: BasicAuth, session_id: Option<SessionId>| {
+            move |username: String, auth: BasicAuth/*, session_id: Option<SessionId>*/| {
                 let podsync = Arc::clone(&podsync);
                 async move {
                     let username = username_fmt.convert(&username)?;
                     let auth = auth.with_path_username(&username)?;
-                    podsync.login(auth, session_id).await
+                    podsync.login(auth, None/*session_id*/).await
                 }
             },
         )
