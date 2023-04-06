@@ -79,7 +79,7 @@ async fn main() {
     let secure = args.secure();
     let podsync = Arc::new(PodSync::new(db));
 
-    let routes = routes(podsync, secure).recover(handle_rejection);
+    let routes = routes(podsync, secure);
 
     warp::serve(routes)
         .run(args.addr().expect("couldn't parse address"))
@@ -274,6 +274,7 @@ fn routes(
                 info.elapsed(),
             );
         }))
+        .recover(handle_rejection)
 }
 
 async fn result_to_json<F, B>(f: F) -> impl warp::Reply
@@ -414,11 +415,7 @@ mod test {
         let podsync = Arc::new(PodSync::new(db));
         let filter = routes(podsync, true);
 
-        let res = warp::test::request()
-            .path("/")
-            .method("GET")
-            .reply(&filter)
-            .await;
+        let res = warp::test::request().path("/").reply(&filter).await;
 
         assert_eq!(res.status(), 200);
     }
@@ -445,6 +442,7 @@ mod test {
         let filter = routes(podsync, true);
         let bob_auth = format!("Basic {}", base64(&format!("{}:{}", "bob", pass)));
 
+        // logging in succeeds
         let res = warp::test::request()
             .path("/api/2/auth/bob/login.json")
             .method("POST")
@@ -453,10 +451,20 @@ mod test {
             .await;
 
         assert_eq!(res.status(), 200);
+
+        // and we're given a cookie
         let cookie = res.headers().get("set-cookie").expect("session cookie");
         let cookie = Cookie::parse(cookie.to_str().unwrap()).unwrap();
 
         assert_eq!(cookie.name(), COOKIE_NAME);
+
+        // we can use this to get our devices:
+        let res = warp::test::request()
+            .path("/api/2/devices/bob.json")
+            .header("cookie", cookie.to_string())
+            .reply(&filter)
+            .await;
+        assert_eq!(res.status(), 200);
 
         // a POST to /login with the same auth and a cookie will verify the cookie:
         let res = warp::test::request()
@@ -466,7 +474,6 @@ mod test {
             .header("cookie", cookie.to_string())
             .reply(&filter)
             .await;
-
         assert_eq!(res.status(), 200);
 
         // and a POST to /login with the wrong auth will reject:
@@ -478,7 +485,22 @@ mod test {
             .header("cookie", cookie.to_string())
             .reply(&filter)
             .await;
+        assert_eq!(res.status(), 401);
 
+        // and logging out will invalidate the session
+        let res = warp::test::request()
+            .path("/api/2/auth/bob/logout.json")
+            .method("POST")
+            .header("cookie", cookie.to_string())
+            .reply(&filter)
+            .await;
+        assert_eq!(res.status(), 200);
+
+        let res = warp::test::request()
+            .path("/api/2/devices/bob.json")
+            .header("cookie", cookie.to_string())
+            .reply(&filter)
+            .await;
         assert_eq!(res.status(), 401);
     }
 }
