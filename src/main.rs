@@ -1,4 +1,4 @@
-use std::{convert::Infallible, future::Future, sync::Arc};
+use std::{future::Future, sync::Arc};
 
 use ::time::ext::NumericalDuration;
 use cookie::{Cookie, SameSite};
@@ -8,7 +8,7 @@ use warp::{
         self,
         header::{HeaderMap, HeaderValue},
     },
-    hyper::{Body, StatusCode},
+    hyper::Body,
     Filter, Rejection, Reply,
 };
 
@@ -381,28 +381,10 @@ fn authorize(
         .unify()
 }
 
-async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
-    #[derive(Serialize)]
-    struct ErrorMessage {
-        code: u16,
-        message: String,
-    }
-
-    let code;
-    let message;
-
-    if let Some(e) = err.find::<podsync::Error>() {
-        code = (*e).into();
-        message = (*e).into();
+async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
+    if let Some(err) = err.find::<podsync::Error>() {
+        Ok(err_to_warp(*err))
     } else {
-        code = StatusCode::INTERNAL_SERVER_ERROR;
-        message = "UNHANDLED_REJECTION";
+        Err(err)
     }
-
-    let json = warp::reply::json(&ErrorMessage {
-        code: code.as_u16(),
-        message: message.into(),
-    });
-
-    Ok(warp::reply::with_status(json, code))
 }

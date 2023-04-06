@@ -55,15 +55,6 @@ impl Into<http::StatusCode> for Error {
         }
     }
 }
-impl Into<&'static str> for Error {
-    fn into(self) -> &'static str {
-        match self {
-            Self::Internal => "Internal Server Error",
-            Self::Unauthorized => "Unauthorized",
-            Self::BadRequest => "Bad Request",
-        }
-    }
-}
 
 impl warp::reject::Reject for Error {}
 
