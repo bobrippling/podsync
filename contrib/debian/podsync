@@ -14,7 +14,7 @@
 ADDR=::1
 PORT=80
 FLAGS=
-DIR=/var/run/podsync
+DIR=/var/lib/podsync
 if test -r /etc/default/podsync; then
 	. /etc/default/podsync
 fi
