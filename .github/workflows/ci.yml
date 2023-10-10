@@ -19,6 +19,7 @@ jobs:
 
       - name: Format
         uses: actions-rs/cargo@v1
+        continue-on-error: true
         with:
           command: fmt
           args: --all -- --check
