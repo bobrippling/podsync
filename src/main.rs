@@ -89,7 +89,7 @@ async fn main() {
 fn routes(
     podsync: Arc<PodSync>,
     secure: bool,
-) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
+) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone + Sync + Send {
     let hello = warp::path::end()
         .and(warp::get())
         .map(|| "PodSync is Working!");
@@ -116,13 +116,12 @@ fn routes(
                         let podsync = podsync.login(auth, session_id).await?;
                         let session_id = podsync.session_id();
 
-                        let cookie = Cookie::build(COOKIE_NAME, session_id.to_string())
+                        let cookie = Cookie::build((COOKIE_NAME, session_id.to_string()))
                             .secure(secure)
                             .http_only(true)
                             .same_site(SameSite::Strict)
                             .max_age(2.weeks())
-                            .path("/api")
-                            .finish();
+                            .path("/api");
 
                         let cookie = HeaderValue::from_str(&cookie.to_string())
                             .map_err(|_| podsync::Error::Internal)?;
