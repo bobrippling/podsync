@@ -1,3 +1,6 @@
+#[cfg(not(any(feature = "backend-sql", feature = "backend-file")))]
+compile_error!("select a single backend feature");
+
 use std::{future::Future, sync::Arc};
 
 use ::time::ext::NumericalDuration;

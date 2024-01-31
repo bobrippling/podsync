@@ -802,7 +802,9 @@ mod test {
                 .await
                 .unwrap();
 
-            let [ref ep] = eps[..] else { panic!("expected single episode") };
+            let [ref ep] = eps[..] else {
+                panic!("expected single episode")
+            };
 
             assert_eq!(
                 ep,
@@ -840,7 +842,13 @@ mod test {
         let new_hash;
         {
             let episodes = query_episodes().await;
-            let [SmallEp { ref modified, ref hash }] = episodes[..] else { panic!("expected single episode") };
+            let [SmallEp {
+                ref modified,
+                ref hash,
+            }] = episodes[..]
+            else {
+                panic!("expected single episode")
+            };
 
             assert_eq!(modified, &Timestamp::now().unwrap());
             assert!(hash.len() > 0); // default is ""
@@ -862,7 +870,13 @@ mod test {
             podsync.update_episodes(vec![change.clone()]).await.unwrap();
 
             let episodes = query_episodes().await;
-            let [SmallEp { ref modified, ref hash }] = episodes[..] else { panic!("expected single episode") };
+            let [SmallEp {
+                ref modified,
+                ref hash,
+            }] = episodes[..]
+            else {
+                panic!("expected single episode")
+            };
 
             assert_eq!(modified, &Timestamp::from_i64(23));
             assert_eq!(hash, &new_hash);
@@ -882,7 +896,13 @@ mod test {
             .await
             .unwrap();
 
-            let [SmallEp { ref modified, ref hash }] = episodes[..] else { panic!("expected single episode") };
+            let [SmallEp {
+                ref modified,
+                ref hash,
+            }] = episodes[..]
+            else {
+                panic!("expected single episode")
+            };
 
             assert_eq!(modified, &Timestamp::from_i64(2));
             assert_eq!(hash, "");
