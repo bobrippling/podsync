@@ -21,7 +21,7 @@ pretty_env_logger = "0.5.0"
 cookie = "0.18.0"
 warp = "0.3.6"
 
-sqlx = { version = "0.6.3", features = ["sqlite", "time", "offline"]}
+sqlx = { version = "0.6.3", features = ["sqlite", "time", "offline"], optional = true }
 # sqlx-cli
 
 base64_light = "0.1.5"
@@ -32,3 +32,6 @@ uuid = { version = "1.4.1", features = ["v4"] }
 default = ["rustls"]
 native-tls = ["sqlx/runtime-tokio-native-tls"]
 rustls = ["sqlx/runtime-tokio-rustls", "warp/tokio-rustls"]
+
+backend-sql = ["dep:sqlx"]
+backend-file = []
