@@ -30,16 +30,6 @@
     },
     "query": "\n                SELECT *\n                FROM users\n                WHERE username = ?\n                "
   },
-  "3d4a325e98d31cb1ff2a7396da6a0712f0abb0dc5203deb5738734e83c198cf6": {
-    "describe": {
-      "columns": [],
-      "nullable": [],
-      "parameters": {
-        "Right": 1
-      }
-    },
-    "query": "\n                UPDATE users\n                SET session_id = NULL\n                WHERE username = ?\n                "
-  },
   "3fb9d968e52bdbfc981705fd91aa8b6b2c3d573a2e7dce7fe9652c1913a2f5bd": {
     "describe": {
       "columns": [
@@ -79,16 +69,6 @@
       }
     },
     "query": "\n                    UPDATE subscriptions\n                    SET\n                        deleted = ?\n                    WHERE username = ?\n                        AND device = ?\n                        AND url = ?\n                        AND deleted IS NULL\n                    "
-  },
-  "4a1e8d47d3e4934dc2d652725ca1adb882ed387bf6565d6d27f5392ab6b77560": {
-    "describe": {
-      "columns": [],
-      "nullable": [],
-      "parameters": {
-        "Right": 2
-      }
-    },
-    "query": "\n                    UPDATE users\n                    SET session_id = ?\n                    WHERE username = ?\n                    "
   },
   "57d484d4581d50a8d41a914e79e6a0870f73f7915acbe7ba84783bcf15aaadc6": {
     "describe": {
@@ -281,6 +261,16 @@
       }
     },
     "query": "\n                    INSERT INTO subscriptions\n                    (username, device, url, created)\n                    VALUES\n                    (?, ?, ?, ?) -- `deleted` <- NULL\n                    ON CONFLICT\n                    DO NOTHING\n                    "
+  },
+  "d8efd2d5bcf76f9fdd7e7ad475963148eacd57d4e3415c42508c932b5b516769": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "\n            UPDATE users\n            SET session_id = ?\n            WHERE username = ?\n            "
   },
   "f2909b05f07252d28cf3cf9f14d2a88a4e2805d3f012794ac7eca6250de084a5": {
     "describe": {

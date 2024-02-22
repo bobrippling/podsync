@@ -15,8 +15,6 @@ use warp::{
     Filter, Rejection, Reply,
 };
 
-use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
-
 use log::{error, info};
 
 mod auth;
@@ -42,10 +40,9 @@ use path_format::split_format_json;
 mod args;
 use args::Args;
 
-#[cfg(test)]
-mod mock;
+mod backend;
+use backend::Backend;
 
-static DB_URL: &str = "sqlite://pod.sql";
 static COOKIE_NAME: &str = "sessionid"; // gpodder/mygpo, doc/api/reference/auth.rst:16
 
 #[derive(Debug, Deserialize)]
@@ -59,28 +56,11 @@ async fn main() {
 
     let args = <Args as clap::Parser>::parse();
 
-    match Sqlite::create_database(DB_URL).await {
-        Ok(()) => {
-            info!("Using {}", DB_URL);
-        }
-        Err(e) => {
-            let sqlx::Error::Database(db_err) = e else {
-                panic!("error creating database: {e}");
-            };
-
-            panic!("sql db error: {db_err:?}"); //.code()
-        }
-    }
-
-    let db = SqlitePool::connect(DB_URL).await.expect("DB connection");
-
-    sqlx::migrate!("./migrations")
-        .run(&db)
-        .await
-        .expect("migration");
+    backend::init().await;
+    let backend = Backend::new().await;
 
     let secure = args.secure();
-    let podsync = Arc::new(PodSync::new(db));
+    let podsync = Arc::new(PodSync::new(backend));
 
     let routes = routes(podsync, secure);
 
@@ -409,13 +389,12 @@ mod test {
     use sqlx::query;
 
     use super::*;
-    use crate::mock;
     use base64_light::base64_encode as base64;
 
     #[tokio::test]
     async fn hello() {
-        let db = mock::create_db().await;
-        let podsync = Arc::new(PodSync::new(db));
+        let db = backend::test::create_db().await;
+        let podsync = Arc::new(PodSync::new(backend::Backend(db)));
         let filter = routes(podsync, true);
 
         let res = warp::test::request().path("/").reply(&filter).await;
@@ -425,7 +404,7 @@ mod test {
 
     #[tokio::test]
     async fn login_session() {
-        let db = mock::create_db().await;
+        let db = backend::test::create_db().await;
 
         // setup bob:abc
         let pass = "abc";
@@ -441,7 +420,7 @@ mod test {
         .await
         .unwrap();
 
-        let podsync = Arc::new(PodSync::new(db));
+        let podsync = Arc::new(PodSync::new(backend::Backend(db)));
         let filter = routes(podsync, true);
         let bob_auth = format!("Basic {}", base64(&format!("{}:{}", "bob", pass)));
 

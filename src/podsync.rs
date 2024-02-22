@@ -1,18 +1,17 @@
-use std::{future::Future, result, str::FromStr, sync::Arc};
+use std::{result, str::FromStr, sync::Arc};
 
 use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
-use sqlx::{query, query_as, Pool, Sqlite, Transaction};
 use warp::http;
 
 use crate::auth::{AuthAttempt, SessionId};
+use crate::backend::Backend;
 use crate::device::{DeviceAndSub, DeviceUpdate};
-use crate::episode::{Episode, EpisodeRaw, Episodes};
+use crate::episode::{Episode, Episodes};
 use crate::subscription::{SubscriptionChangesFromClient, SubscriptionChangesToClient};
 use crate::time::Timestamp;
-use crate::user::User;
 
-pub struct PodSync(Pool<Sqlite>);
+pub struct PodSync(Backend);
 
 pub struct PodSyncAuthed<const USER_MATCH: bool = false> {
     sync: Arc<PodSync>,
@@ -30,11 +29,11 @@ pub struct UpdatedUrls {
 
 #[derive(Debug, Deserialize)]
 pub struct QueryEpisodes {
-    since: Option<Timestamp>,
+    pub since: Option<Timestamp>,
     #[allow(dead_code)]
-    aggregated: Option<bool>,
-    podcast: Option<String>,
-    device: Option<String>,
+    pub aggregated: Option<bool>,
+    pub podcast: Option<String>,
+    pub device: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -59,8 +58,8 @@ impl Into<http::StatusCode> for Error {
 impl warp::reject::Reject for Error {}
 
 impl PodSync {
-    pub fn new(db: Pool<Sqlite>) -> Self {
-        Self(db)
+    pub fn new(backend: Backend) -> Self {
+        Self(backend)
     }
 
     pub async fn login(
@@ -70,19 +69,8 @@ impl PodSync {
     ) -> Result<PodSyncAuthed<true>> {
         let username = auth_attempt.user();
 
-        let user = query_as!(
-            User,
-            "
-                SELECT *
-                FROM users
-                WHERE username = ?
-                ",
-            username,
-        )
-        .fetch_one(&self.0)
-        .await
-        .map_err(|e| {
-            if matches!(e, sqlx::Error::RowNotFound) {
+        let user = self.0.find_user(username).await.map_err(|e| {
+            if matches!(e, crate::backend::FindError::NotFound) {
                 error!("rejecting non-existant user {}", username);
                 Error::Unauthorized
             } else {
@@ -107,7 +95,7 @@ impl PodSync {
         let db_session_id = match user.session_id {
             Some(ref id) => {
                 let session_id = SessionId::from_str(&id).map_err(|()| {
-                    error!("invalid session_id in database: {:?}", user.session_id);
+                    error!("invalid stored session_id: {:?}", user.session_id);
                     Error::Internal
                 })?;
                 Some(session_id)
@@ -119,23 +107,12 @@ impl PodSync {
             (None, None) => {
                 // initial login
                 let session_id = SessionId::new();
-                let str = session_id.to_string();
+                let session_id_str = session_id.to_string();
 
-                query!(
-                    "
-                    UPDATE users
-                    SET session_id = ?
-                    WHERE username = ?
-                    ",
-                    str,
-                    username,
-                )
-                .execute(&self.0)
-                .await
-                .map_err(|e| {
-                    error!("couldn't login user {}: {e:?}", username);
-                    Error::Internal
-                })?;
+                if !self.0.update_user(username, Some(&session_id_str)).await {
+                    error!("couldn't login user {}", username);
+                    return Err(Error::Internal);
+                }
 
                 info!("{username} login: new session created");
                 ok(session_id)
@@ -165,21 +142,7 @@ impl PodSync {
     pub async fn authenticate(self: &Arc<Self>, session_id: SessionId) -> Result<PodSyncAuthed> {
         let session_str = session_id.to_string();
 
-        let users = query_as!(
-            User,
-            "
-            SELECT *
-            FROM users
-            WHERE session_id = ?
-            ",
-            session_str,
-        )
-        .fetch_all(&self.0)
-        .await
-        .map_err(|e| {
-            error!("couldn't query for session {session_id}: {e:?}");
-            Error::Internal
-        })?;
+        let users = self.0.users_with_session(&session_str).await?;
 
         match &users[..] {
             [] => {
@@ -227,21 +190,12 @@ impl PodSyncAuthed<true> {
         let username = &self.username;
         info!("{username} logout");
 
-        query!(
-            "
-                UPDATE users
-                SET session_id = NULL
-                WHERE username = ?
-                ",
-            username,
-        )
-        .execute(&self.sync.0)
-        .await
-        .map(|_| ())
-        .map_err(|e| {
-            error!("error updating session_id: {e:?}");
-            Error::Internal
-        })
+        self.sync
+            .0
+            .update_user(username, None)
+            .await
+            .then(|| ())
+            .ok_or(Error::Internal)
     }
 
     pub fn session_id(&self) -> &SessionId {
@@ -252,27 +206,9 @@ impl PodSyncAuthed<true> {
         let username = &self.username;
         trace!("{username} getting devices");
 
-        query_as!(
-            DeviceAndSub,
-            r#"
-            SELECT id, caption as "caption!: _", type as "type!: _", COUNT(*) as "subscriptions!: _"
-            FROM devices
-            INNER JOIN subscriptions
-                ON devices.username = subscriptions.username
-            GROUP BY devices.username, devices.id
-            HAVING devices.username = ?
-            "#,
-            username,
-        )
-        .fetch_all(&self.sync.0)
-        .await
-        .map(|devs| {
+        self.sync.0.devices_for_user(username).await.map(|devs| {
             info!("{username}, {} devices", devs.len());
             devs
-        })
-        .map_err(|e| {
-            error!("error selecting devices: {:?}", e);
-            Error::Internal
         })
     }
 
@@ -280,42 +216,7 @@ impl PodSyncAuthed<true> {
         let username = &self.username;
         info!("{username} updating device {device_id}: {update:?}");
 
-        let caption: Option<_> = update.caption;
-        let type_default = update.r#type.clone().unwrap_or_default();
-        let r#type: Option<_> = update.r#type;
-
-        let result = query!(
-            "
-            INSERT INTO devices
-            (id, username, caption, type)
-            VALUES
-            (?, ?, ?, ?)
-            ON CONFLICT
-            DO
-                UPDATE SET
-                    caption = coalesce(?, devices.caption),
-                    type = coalesce(?, devices.type)
-                WHERE id = ? AND username = ?
-            ",
-            device_id,
-            username,
-            caption,
-            type_default,
-            caption,
-            r#type,
-            device_id,
-            username
-        )
-        .execute(&self.sync.0)
-        .await;
-
-        match result {
-            Ok(_result) => Ok(()),
-            Err(e) => {
-                error!("error inserting device: {:?}", e);
-                Err(Error::Internal)
-            }
-        }
+        self.sync.0.update_device(username, device_id, update).await
     }
 
     pub async fn subscriptions(
@@ -327,37 +228,11 @@ impl PodSyncAuthed<true> {
 
         trace!("{username} on {device_id}, requesting subscription changes since {since}");
 
-        #[derive(Debug, sqlx::FromRow)]
-        struct Url {
-            url: String,
-            deleted: Option<Timestamp>,
-            created: Timestamp,
-        }
-
-        let urls = query_as!(
-            Url,
-            r#"
-            SELECT url,
-                deleted as "deleted: _",
-                created as "created!: _"
-            FROM subscriptions
-            WHERE username = ?
-                AND device = ?
-                AND (
-                    created > ? OR deleted > ?
-                )
-            "#,
-            username,
-            device_id,
-            since,
-            since,
-        )
-        .fetch_all(&self.sync.0)
-        .await
-        .map_err(|e| {
-            error!("error selecting subscriptions: {e:?}");
-            Error::Internal
-        })?;
+        let urls = self
+            .sync
+            .0
+            .subscriptions(username, device_id, since)
+            .await?;
 
         enum E {
             Created(String),
@@ -405,27 +280,6 @@ impl PodSyncAuthed<true> {
         })
     }
 
-    async fn transact<'t, T, R, F>(&self, transaction: T) -> Result<R>
-    where
-        T: FnOnce(Transaction<'t, Sqlite>) -> F,
-        F: Future<Output = Result<(Transaction<'t, Sqlite>, R)>>,
-    {
-        let tx = self.sync.0.begin().await.map_err(|e| {
-            error!("error beginning transaction: {:?}", e);
-            Error::Internal
-        })?;
-
-        // could probably pass &mut *tx here
-        let (tx, r) = transaction(tx).await?;
-
-        tx.commit().await.map_err(|e| {
-            error!("error committing transaction: {:?}", e);
-            Error::Internal
-        })?;
-
-        Ok(r)
-    }
-
     pub async fn update_subscriptions(
         &self,
         device_id: &str,
@@ -436,63 +290,10 @@ impl PodSyncAuthed<true> {
 
         trace!("{username} updating subscription for device {device_id}");
 
-        self.transact(|mut tx| async {
-            for url in &changes.remove {
-                query!(
-                    "
-                    UPDATE subscriptions
-                    SET
-                        deleted = ?
-                    WHERE username = ?
-                        AND device = ?
-                        AND url = ?
-                        AND deleted IS NULL
-                    ",
-                    now,
-                    username,
-                    device_id,
-                    url,
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    error!("error deleting (updating) subscription: {e:?}");
-                    Error::Internal
-                })?;
-            }
-
-            for url in &changes.add {
-                query!(
-                    "
-                    INSERT INTO subscriptions
-                    (username, device, url, created)
-                    VALUES
-                    (?, ?, ?, ?) -- `deleted` <- NULL
-                    ON CONFLICT
-                    DO NOTHING
-                    ",
-                    username,
-                    device_id,
-                    url,
-                    now,
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    error!("error inserting subscription: {e:?}");
-                    Error::Internal
-                })?;
-            }
-
-            Ok((tx, ()))
-        })
-        .await?;
-
-        info!(
-            "{username} on {device_id}, added {} subscriptions, removed {}, timestamp {now}",
-            changes.add.len(),
-            changes.remove.len()
-        );
+        self.sync
+            .0
+            .update_subscriptions(username, device_id, &changes, now)
+            .await?;
 
         Ok(UpdatedUrls {
             timestamp: now,
@@ -506,45 +307,15 @@ impl PodSyncAuthed<true> {
 
     pub async fn episodes(&self, query: QueryEpisodes) -> Result<Episodes> {
         let username = &self.username;
-        let since = query.since.unwrap_or_else(Timestamp::zero);
-        let podcast_filter = query.podcast;
-        let device_filter = query.device;
-        // query.aggregated: unique on (sub, episode)-tuple - always true with how we store
 
         trace!(
-            "{username}, requesting episode changes since {since}, device={}, podcast={}",
-            device_filter.as_deref().unwrap_or("<none>"),
-            podcast_filter.as_deref().unwrap_or("<none>"),
+            "{username}, requesting episode changes since {:?}, device={}, podcast={}",
+            query.since,
+            query.device.as_deref().unwrap_or("<none>"),
+            query.podcast.as_deref().unwrap_or("<none>"),
         );
 
-        let episodes = query_as!(
-            EpisodeRaw,
-            r#"
-            SELECT episodes.podcast, episode,
-                guid, episodes.device,
-                timestamp as "timestamp: _",
-                action as "action!: _",
-                started, position, total,
-                modified as "modified?: _"
-            FROM
-                episodes,
-                (SELECT ? as podcast, ? as device) as filter
-            WHERE username = ?
-                AND modified > ?
-                AND (filter.podcast IS NULL OR filter.podcast = episodes.podcast)
-                AND (filter.device IS NULL OR filter.device = episodes.device)
-            "#,
-            podcast_filter,
-            device_filter,
-            username,
-            since,
-        )
-        .fetch_all(&self.sync.0)
-        .await
-        .map_err(|e| {
-            error!("error selecting episodes: {e:?}");
-            Error::Internal
-        })?;
+        let episodes = self.sync.0.episodes(username, &query).await?;
 
         let latest = episodes.iter().filter_map(|ep| ep.modified).max();
 
@@ -553,7 +324,7 @@ impl PodSyncAuthed<true> {
             .map(TryInto::try_into)
             .collect::<result::Result<Vec<Episode>, _>>()
             .map_err(|e| {
-                error!("couldn't construct episode changes from DB: {e:?}");
+                error!("couldn't construct episode changes from backend: {e:?}");
                 Error::Internal
             })?;
 
@@ -594,98 +365,21 @@ impl PodSyncAuthed<true> {
         let now = now()?;
         let change_count = changes.len();
 
-        self.transact(|mut tx| async {
-            for change in changes {
-                let hash = change.hash();
-
-                let EpisodeRaw {
-                    podcast,
-                    episode,
-                    timestamp,
-                    guid,
-                    action,
-                    started,
-                    position,
-                    total,
-                    device,
-                    modified: _,
-                } = change.into();
-
-                query!(
-                    "
-                    INSERT INTO episodes
-                    (
-                        username, device,
-                        podcast, episode,
-                        timestamp, guid,
-                        action,
-                        started, position, total,
-                        modified
-                    )
-                    VALUES
-                    (
-                        ?, ?,
-                        ?, ?,
-                        ?, ?,
-                        ?,
-                        ?, ?, ?,
-                        ?
-                    )
-                    ON CONFLICT
-                    DO
-                        UPDATE SET
-                            timestamp = coalesce(?, episodes.timestamp),
-                            guid = coalesce(?, episodes.guid),
-                            action = coalesce(?, episodes.action),
-                            started = coalesce(?, episodes.started),
-                            position = coalesce(?, episodes.position),
-                            total = coalesce(?, episodes.total),
-                            modified = ?,
-                            content_hash = ?
-                        -- only update if we've changed the contents
-                        WHERE content_hash <> ?
-                    ",
-                    // values
-                    username,
-                    device,
-                    podcast,
-                    episode,
-                    timestamp,
-                    guid,
-                    action,
-                    started,
-                    position,
-                    total,
-                    now,
-                    // update
-                    timestamp,
-                    guid,
-                    action,
-                    started,
-                    position,
-                    total,
-                    now,
-                    hash,
-                    // update where
-                    hash,
-                )
-                .execute(&mut tx)
-                .await
-                .map_err(|e| {
-                    error!("error querying mid-transaction: {:?}", e);
-                    Error::Internal
-                })?;
-            }
-
-            Ok((tx, ()))
-        })
-        .await?;
+        self.sync.0.update_episodes(username, now, changes).await?;
 
         info!("{username} updated {change_count} episodes, timestamp {now}");
 
         let update_timestamp = now;
         Ok(UpdatedUrls::just_timestamp(update_timestamp))
     }
+}
+
+#[derive(Debug)]
+#[cfg_attr(backend_sql, derive(sqlx::FromRow))]
+pub struct Url {
+    pub url: String,
+    pub deleted: Option<Timestamp>,
+    pub created: Timestamp,
 }
 
 fn now() -> Result<Timestamp> {
@@ -708,11 +402,11 @@ impl UpdatedUrls {
 mod test {
     use super::*;
 
+    use sqlx::{query, query_as};
     use uuid::Uuid;
 
+    use crate::backend;
     use crate::episode::{EpisodeAction, Time};
-
-    use crate::mock;
 
     fn create_session() -> SessionId {
         Uuid::try_parse("550e8400-e29b-41d4-a716-446655440000")
@@ -721,8 +415,8 @@ mod test {
     }
 
     async fn create_podsync(username: &str) -> PodSyncAuthed<true> {
-        let db = mock::create_db().await;
-        let podsync = Arc::new(PodSync(db));
+        let db = backend::test::create_db().await;
+        let podsync = Arc::new(PodSync(backend::Backend(db)));
         PodSyncAuthed {
             sync: podsync,
             session_id: create_session(),
@@ -775,7 +469,7 @@ mod test {
             podcast,
             episode,
         )
-        .execute(&podsync.sync.0)
+        .execute(&podsync.sync.0 .0)
         .await
         .unwrap();
 
@@ -833,7 +527,7 @@ mod test {
                 "#,
                 username
             )
-            .fetch_all(&podsync.sync.0)
+            .fetch_all(&podsync.sync.0 .0)
             .await
             .unwrap()
         };
@@ -863,7 +557,7 @@ mod test {
                 "UPDATE episodes SET modified = 23 WHERE username = ?",
                 username
             )
-            .execute(&podsync.sync.0)
+            .execute(&podsync.sync.0 .0)
             .await
             .unwrap();
 
@@ -892,7 +586,7 @@ mod test {
                 WHERE username = "u2"
                 "#
             )
-            .fetch_all(&podsync.sync.0)
+            .fetch_all(&podsync.sync.0 .0)
             .await
             .unwrap();
 
