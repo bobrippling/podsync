@@ -8,10 +8,12 @@ use crate::backend::FindError;
 
 use crate::device::{DeviceAndSub, DeviceUpdate};
 use crate::episode::{Episode, EpisodeRaw};
-use crate::podsync::{Error, QueryEpisodes, Url};
+use crate::podsync::{QueryEpisodes, Url};
 use crate::subscription::SubscriptionChangesFromClient;
 use crate::user::User;
 use crate::Timestamp;
+
+type Result<T> = std::result::Result<T, ()>;
 
 static DB_URL: &str = "sqlite://pod.sql";
 
@@ -46,14 +48,13 @@ impl Backend {
 }
 
 impl Backend {
-    async fn transact<'t, T, R, F>(&self, transaction: T) -> Result<R, Error>
+    async fn transact<'t, T, R, F>(&self, transaction: T) -> Result<R>
     where
         T: FnOnce(Transaction<'t, Sqlite>) -> F,
-        F: Future<Output = Result<(Transaction<'t, Sqlite>, R), Error>>,
+        F: Future<Output = Result<(Transaction<'t, Sqlite>, R)>>,
     {
         let tx = self.0.begin().await.map_err(|e| {
             error!("error beginning transaction: {:?}", e);
-            Error::Internal
         })?;
 
         // could probably pass &mut *tx here
@@ -61,7 +62,6 @@ impl Backend {
 
         tx.commit().await.map_err(|e| {
             error!("error committing transaction: {:?}", e);
-            Error::Internal
         })?;
 
         Ok(r)
@@ -69,7 +69,7 @@ impl Backend {
 }
 
 impl Backend {
-    pub async fn find_user(&self, username: &str) -> Result<User, FindError> {
+    pub async fn find_user(&self, username: &str) -> std::result::Result<User, FindError> {
         query_as!(
             User,
             "
@@ -110,7 +110,7 @@ impl Backend {
         .is_ok()
     }
 
-    pub async fn users_with_session(&self, session_id: &str) -> Result<Vec<User>, Error> {
+    pub async fn users_with_session(&self, session_id: &str) -> Result<Vec<User>> {
         query_as!(
             User,
             "
@@ -124,13 +124,12 @@ impl Backend {
         .await
         .map_err(|e| {
             error!("couldn't query for session {session_id}: {e:?}");
-            Error::Internal
         })
     }
 }
 
 impl Backend {
-    pub async fn devices_for_user(&self, username: &str) -> Result<Vec<DeviceAndSub>, Error> {
+    pub async fn devices_for_user(&self, username: &str) -> Result<Vec<DeviceAndSub>> {
         query_as!(
             DeviceAndSub,
             r#"
@@ -147,7 +146,6 @@ impl Backend {
         .await
         .map_err(|e| {
             error!("error selecting devices: {:?}", e);
-            Error::Internal
         })
     }
 
@@ -156,7 +154,7 @@ impl Backend {
         username: &str,
         device_id: &str,
         update: DeviceUpdate,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let caption = update.caption;
         let r#type = update.r#type;
         let type_default = r#type.clone().unwrap_or_default();
@@ -188,7 +186,6 @@ impl Backend {
         .map(|_| ())
         .map_err(|e| {
             error!("error inserting device: {:?}", e);
-            Error::Internal
         })
     }
 }
@@ -199,7 +196,7 @@ impl Backend {
         username: &str,
         device_id: &str,
         since: Timestamp,
-    ) -> Result<Vec<Url>, Error> {
+    ) -> Result<Vec<Url>> {
         query_as!(
             Url,
             r#"
@@ -222,7 +219,6 @@ impl Backend {
         .await
         .map_err(|e| {
             error!("error selecting subscriptions: {e:?}");
-            Error::Internal
         })
     }
 
@@ -232,7 +228,7 @@ impl Backend {
         device_id: &str,
         changes: &SubscriptionChangesFromClient,
         now: Timestamp,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         self.transact(|mut tx| async {
             for url in &changes.remove {
                 query!(
@@ -254,7 +250,6 @@ impl Backend {
                 .await
                 .map_err(|e| {
                     error!("error deleting (updating) subscription: {e:?}");
-                    Error::Internal
                 })?;
             }
 
@@ -277,7 +272,6 @@ impl Backend {
                 .await
                 .map_err(|e| {
                     error!("error inserting subscription: {e:?}");
-                    Error::Internal
                 })?;
             }
 
@@ -296,11 +290,7 @@ impl Backend {
 }
 
 impl Backend {
-    pub async fn episodes(
-        &self,
-        username: &str,
-        query: &QueryEpisodes,
-    ) -> Result<Vec<EpisodeRaw>, Error> {
+    pub async fn episodes(&self, username: &str, query: &QueryEpisodes) -> Result<Vec<EpisodeRaw>> {
         let since = query.since.unwrap_or_else(Timestamp::zero);
         let podcast_filter = &query.podcast;
         let device_filter = &query.device;
@@ -332,7 +322,6 @@ impl Backend {
         .await
         .map_err(|e| {
             error!("error selecting episodes: {e:?}");
-            Error::Internal
         })
     }
 
@@ -341,7 +330,7 @@ impl Backend {
         username: &str,
         now: Timestamp,
         changes: Vec<Episode>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         self.transact(|mut tx| async {
             for change in changes {
                 let hash = change.hash();
@@ -421,7 +410,6 @@ impl Backend {
                 .await
                 .map_err(|e| {
                     error!("error querying mid-transaction: {:?}", e);
-                    Error::Internal
                 })?;
             }
 

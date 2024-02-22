@@ -142,7 +142,11 @@ impl PodSync {
     pub async fn authenticate(self: &Arc<Self>, session_id: SessionId) -> Result<PodSyncAuthed> {
         let session_str = session_id.to_string();
 
-        let users = self.0.users_with_session(&session_str).await?;
+        let users = self
+            .0
+            .users_with_session(&session_str)
+            .await
+            .map_err(|()| Error::Internal)?;
 
         match &users[..] {
             [] => {
@@ -206,17 +210,26 @@ impl PodSyncAuthed<true> {
         let username = &self.username;
         trace!("{username} getting devices");
 
-        self.sync.0.devices_for_user(username).await.map(|devs| {
-            info!("{username}, {} devices", devs.len());
-            devs
-        })
+        self.sync
+            .0
+            .devices_for_user(username)
+            .await
+            .map(|devs| {
+                info!("{username}, {} devices", devs.len());
+                devs
+            })
+            .map_err(|()| Error::Internal)
     }
 
     pub async fn update_device(&self, device_id: &str, update: DeviceUpdate) -> Result<()> {
         let username = &self.username;
         info!("{username} updating device {device_id}: {update:?}");
 
-        self.sync.0.update_device(username, device_id, update).await
+        self.sync
+            .0
+            .update_device(username, device_id, update)
+            .await
+            .map_err(|()| Error::Internal)
     }
 
     pub async fn subscriptions(
@@ -232,7 +245,8 @@ impl PodSyncAuthed<true> {
             .sync
             .0
             .subscriptions(username, device_id, since)
-            .await?;
+            .await
+            .map_err(|()| Error::Internal)?;
 
         enum E {
             Created(String),
@@ -293,7 +307,8 @@ impl PodSyncAuthed<true> {
         self.sync
             .0
             .update_subscriptions(username, device_id, &changes, now)
-            .await?;
+            .await
+            .map_err(|()| Error::Internal)?;
 
         Ok(UpdatedUrls {
             timestamp: now,
@@ -315,7 +330,12 @@ impl PodSyncAuthed<true> {
             query.podcast.as_deref().unwrap_or("<none>"),
         );
 
-        let episodes = self.sync.0.episodes(username, &query).await?;
+        let episodes = self
+            .sync
+            .0
+            .episodes(username, &query)
+            .await
+            .map_err(|()| Error::Internal)?;
 
         let latest = episodes.iter().filter_map(|ep| ep.modified).max();
 
@@ -365,7 +385,11 @@ impl PodSyncAuthed<true> {
         let now = now()?;
         let change_count = changes.len();
 
-        self.sync.0.update_episodes(username, now, changes).await?;
+        self.sync
+            .0
+            .update_episodes(username, now, changes)
+            .await
+            .map_err(|()| Error::Internal)?;
 
         info!("{username} updated {change_count} episodes, timestamp {now}");
 
