@@ -1,4 +1,7 @@
+use std::fs::File;
 use std::future::Future;
+use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 
 use log::{error, info};
 
@@ -13,19 +16,61 @@ use crate::Timestamp;
 
 type Result<T> = std::result::Result<T, ()>;
 
-pub struct Backend;
+pub struct Backend {
+    root: PathBuf,
+}
 
 pub async fn init() {}
 
 impl Backend {
     pub async fn new() -> Self {
-        Self
+        Self {
+            root: PathBuf::from("./"),
+        }
     }
 }
 
 impl Backend {
-    pub async fn find_user(&self, username: &str) -> std::result::Result<User, FindError> {
-        todo!()
+    fn open(&self, filename: &str) -> Result<File> {
+        let mut p = self.root.clone();
+        p.push(filename);
+
+        File::open(&p).map_err(|e| {
+            error!("couldn't open {:?}", p);
+        })
+    }
+}
+
+impl Backend {
+    pub async fn find_user(&self, target_username: &str) -> std::result::Result<User, FindError> {
+        let file = self.open("users.txt").map_err(|()| FindError::Internal)?;
+
+        for line in BufReader::new(file).lines() {
+            let line = line.map_err(|e| {
+                error!("couldn't read line: {e}");
+                FindError::Internal
+            })?;
+
+            let parts = line.split(' ').collect::<Vec<_>>();
+            let [username, pwhash, session_id] = parts[..] else {
+                error!("invalid users line format");
+                return Err(FindError::Internal);
+            };
+
+            if username == target_username {
+                return Ok(User {
+                    username: username.into(),
+                    pwhash: pwhash.into(),
+                    session_id: if session_id.len() > 0 {
+                        Some(session_id.into())
+                    } else {
+                        None
+                    },
+                });
+            }
+        }
+
+        Err(FindError::NotFound)
     }
 
     /// session_id: set to None to logout / make NULL
@@ -96,4 +141,6 @@ pub mod test {
     pub async fn create_db() -> Pool<Sqlite> {
         todo!()
     }
+
+    fn test_find_user() {}
 }
