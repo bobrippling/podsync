@@ -384,6 +384,7 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "backend-sql")]
 mod test {
     use sqlx::query;
 

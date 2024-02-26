@@ -423,6 +423,7 @@ impl UpdatedUrls {
 }
 
 #[cfg(test)]
+#[cfg(feature = "backend-sql")]
 mod test {
     use super::*;
 
