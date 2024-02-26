@@ -1,6 +1,10 @@
 use std::env::{self, VarError};
 
+#[allow(unreachable_code)]
 fn main() {
+    #[cfg(not(feature = "backend-sql"))]
+    return;
+
     let use_db = |_url| {
         // println!("cargo:rustc-env=DATABASE_URL={}", url);
         println!("cargo:rerun-if-changed=migrations");
