@@ -1,0 +1,81 @@
+name: podsync release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+
+    permissions:
+      "contents": "write"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Setup Rust (armv7)
+        run: |
+          rustup target add armv7-unknown-linux-gnueabihf
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf
+
+      - name: Build x64
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: >
+            --release
+            --features backend-sql
+
+      - name: Build armv7
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: >
+            --release
+            --features backend-sql
+            --target armv7-unknown-linux-gnueabihf
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: true
+          prerelease: false
+
+      - name: Upload x64 binary
+        id: upload-release-asset-x64
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/release/podsync
+          asset_name: podsync-x64
+          asset_content_type: application/octet-stream
+
+      - name: Upload armv7 binary
+        id: upload-release-asset-armv7
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/armv7-unknown-linux-gnueabihf/release/podsync
+          asset_name: podsync-armv7
+          asset_content_type: application/octet-stream
