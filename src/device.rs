@@ -24,16 +24,23 @@ pub enum DeviceType {
     Other, // aka null
 }
 
+impl DeviceType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Desktop => "Desktop",
+            Self::Laptop => "Laptop",
+            Self::Mobile => "Mobile",
+            Self::Server => "Server",
+            Self::Other => "Other",
+        }
+    }
+}
+
 impl Default for DeviceType {
     fn default() -> Self {
         Self::Other
     }
 }
-
-// mod null_type {
-//     deserialize
-//     serialize
-// }
 
 impl TryFrom<&'_ str> for DeviceType {
     type Error = ();

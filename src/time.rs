@@ -24,7 +24,6 @@ impl Timestamp {
             .map(Self)
     }
 
-    #[cfg(test)]
     pub fn from_i64(i: i64) -> Self {
         Self(i)
     }
