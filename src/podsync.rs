@@ -7,7 +7,7 @@ use warp::http;
 use crate::auth::{AuthAttempt, SessionId};
 use crate::backend::Backend;
 use crate::device::{DeviceAndSub, DeviceUpdate};
-use crate::episode::{Episode, Episodes};
+use crate::episode::{Episode, Episodes, Time};
 use crate::subscription::{SubscriptionChangesFromClient, SubscriptionChangesToClient};
 use crate::time::Timestamp;
 
@@ -354,9 +354,10 @@ impl PodSyncAuthed<true> {
             })?;
 
         // workaround a bug in antennapod - populate the timestamp (EpisodeActionFilter.java:75)
+        let ep_time = Time::epoch();
         for ep in &mut episodes {
             if ep.timestamp.is_none() {
-                ep.timestamp = Some(Default::default());
+                ep.timestamp = Some(ep_time.clone());
             }
         }
 
