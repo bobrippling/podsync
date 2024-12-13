@@ -15,7 +15,7 @@ use warp::{
     Filter, Rejection, Reply,
 };
 
-use log::{error, info};
+use log::{debug, error, info};
 
 mod auth;
 use auth::{BasicAuth, SessionId};
@@ -91,7 +91,7 @@ fn routes(
                         let auth = match auth {
                             Some(auth) => auth.with_path_username(&username),
                             None => {
-                                error!("hi");
+                                error!("couldn't auth \"{username}\" - no auth header/cookie");
                                 Err(podsync::Error::Unauthorized)
                             }
                         }?;
@@ -340,6 +340,14 @@ fn cookie_authorize(
                         .authenticate(session_id)
                         .await?
                         .with_user(username_fmt.convert(&username)?)
+                        .map(|authed| {
+                            debug!("authed (via cookie) user {}", authed.username());
+                            authed
+                        })
+                        .map_err(|e| {
+                            debug!("no auth via cookie");
+                            e
+                        })
                 }
             }
         })
@@ -355,6 +363,7 @@ fn login_authorize(
         .and(warp::cookie::optional(COOKIE_NAME))
         .then(
             move |username: String, auth: BasicAuth, session_id: Option<SessionId>| {
+                info!("login auth");
                 let podsync = Arc::clone(&podsync);
                 async move {
                     let username = username_fmt.convert(&username)?;

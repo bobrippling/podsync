@@ -1,6 +1,6 @@
 use std::{result, str::FromStr, sync::Arc};
 
-use log::{error, info, trace};
+use log::{debug, error, info, trace};
 use serde::{Deserialize, Serialize};
 use warp::http;
 
@@ -191,6 +191,10 @@ impl PodSyncAuthed {
 }
 
 impl PodSyncAuthed<true> {
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
     pub async fn logout(&self) -> Result<()> {
         let username = &self.username;
         info!("{username} logout");
