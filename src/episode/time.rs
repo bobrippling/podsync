@@ -23,6 +23,7 @@ impl Time {
 
 impl Time {
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn from_i64(i: i64) -> Self {
         use time::Time;
         let dt = PrimitiveDateTime::new(

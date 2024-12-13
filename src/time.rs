@@ -27,6 +27,7 @@ impl Timestamp {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn from_i64(i: i64) -> Self {
         Self(i)
     }

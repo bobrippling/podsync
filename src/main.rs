@@ -1,3 +1,5 @@
+#![deny(unexpected_cfgs)]
+
 #[cfg(not(any(feature = "backend-sql", feature = "backend-file")))]
 compile_error!("select a single backend feature");
 

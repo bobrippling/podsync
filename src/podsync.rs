@@ -405,7 +405,7 @@ impl PodSyncAuthed<true> {
 }
 
 #[derive(Debug)]
-#[cfg_attr(backend_sql, derive(sqlx::FromRow))]
+#[cfg_attr(feature = "backend-sql", derive(sqlx::FromRow))]
 pub struct Url {
     pub url: String,
     pub deleted: Option<Timestamp>,
