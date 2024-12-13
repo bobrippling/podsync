@@ -71,12 +71,12 @@ impl Backend {
     }
 
     fn read_user(&self, username: &str) -> Result<KeyValues, FindError> {
-        let path = path!(self.root, "users", username);
+        let path = path!(self.root, "users", username, "creds.txt");
         self.read(path, &["pwhash", "session_id"])
     }
 
     fn write_user(&self, username: &str, keyvalues: &KeyValues) -> Result<(), std::io::Error> {
-        let path = path!(self.root, "users", username);
+        let path = path!(self.root, "users", username, "creds.txt");
         self.write(path, keyvalues)
     }
 }
@@ -270,11 +270,9 @@ impl Backend {
             };
 
             let parse = |s: &str| {
-                s.parse()
-                    .map_err(|e| {
-                        error!("couldn't parse \"{s}\" as a timestamp: {e:?}");
-                    })
-                    .map(Timestamp::from_i64)
+                s.parse().map_err(|e| {
+                    error!("couldn't parse \"{s}\" as a timestamp: {e:?}");
+                })
             };
 
             subs.push((
@@ -377,18 +375,25 @@ impl Backend {
         username: &str,
         query: &QueryEpisodes,
     ) -> Result<Vec<EpisodeRaw>, ()> {
-        let path = path!(self.root, "users", "episodes");
+        let path = path!(self.root, "users", username, "episodes.txt");
         let file = File::open(&path).map_err(|e| {
             error!("open \"{path:?}\": {e:?}");
         })?;
+
+        let mut eps = vec![];
 
         for line in BufReader::new(file).lines() {
             let line = line.map_err(|e| {
                 error!("read \"{path:?}\": {e:?}");
             })?;
 
-            // TODO: json for this
+            let ep = serde_json::from_str(&line).map_err(|e| {
+                error!("couldn't parse episode line for {username}");
+            })?;
+            eps.push(ep);
         }
+
+        Ok(eps)
     }
 
     pub async fn update_episodes(
@@ -397,22 +402,46 @@ impl Backend {
         now: Timestamp,
         changes: Vec<Episode>,
     ) -> Result<(), ()> {
+        let mut eps = self.episodes(username, &QueryEpisodes::default()).await?;
+
         for change in changes {
-            let EpisodeRaw {
-                podcast,
-                episode,
-                timestamp,
-                guid,
-                action,
-                started,
-                position,
-                total,
-                device,
-                modified: _,
-            } = change.into();
-            // insert username, device, podcast,
+            // insert `change`, if conflict then replace
+            // supplement with username, device, podcast
+
+            let change: EpisodeRaw = change.into();
+            let change_id = change.id();
+            let found = eps.iter_mut().find(|ep| ep.id() == change_id);
+
+            match found {
+                Some(ep) => {
+                    *ep = change;
+                }
+                None => {
+                    eps.push(change);
+                }
+            }
         }
-        todo!()
+
+        let path = path!(self.root, "users", username, "episodes.txt");
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(path)
+            .map_err(|e| {
+                error!("couldn't open \"{username}\"'s episodes: {e:?}");
+            })?;
+
+        for ep in eps {
+            let json = serde_json::to_string(&ep).map_err(|e| {
+                error!("couldn't convert episode to json: {e:?}");
+            })?;
+
+            writeln!(file, "{}", json).map_err(|e| {
+                error!("writing \"{username}\" episode: {e:?}");
+            })?;
+        }
+
+        Ok(())
     }
 }
 

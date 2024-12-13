@@ -18,6 +18,7 @@ pub struct Episode {
 }
 
 impl Episode {
+    #[allow(dead_code)]
     pub fn hash(&self) -> String {
         use std::{
             collections::hash_map::DefaultHasher,
@@ -27,6 +28,14 @@ impl Episode {
         let mut hasher = DefaultHasher::new();
         Hash::hash(self, &mut hasher);
         hasher.finish().to_string()
+    }
+
+    #[allow(dead_code)]
+    pub fn id(&self) -> EpisodeId<'_> {
+        EpisodeId {
+            podcast: self.podcast.as_str(),
+            episode: self.episode.as_str(),
+        }
     }
 }
 
@@ -47,6 +56,14 @@ pub struct EpisodeRaw {
     pub total: Option<TimePrimitive>,
 
     pub modified: Option<Timestamp>, // for db, not for http
+}
+
+// episodes are unique on username, podcast & episode
+// (we assume username is dealt with elsewhere)
+#[derive(PartialEq, Eq)]
+pub struct EpisodeId<'e> {
+    podcast: &'e str,
+    episode: &'e str,
 }
 
 impl EpisodeRaw {
@@ -73,6 +90,13 @@ impl EpisodeRaw {
             total,
             device,
             modified,
+        }
+    }
+
+    pub fn id(&self) -> EpisodeId<'_> {
+        EpisodeId {
+            podcast: self.podcast.as_str(),
+            episode: self.episode.as_str(),
         }
     }
 }

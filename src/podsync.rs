@@ -27,7 +27,7 @@ pub struct UpdatedUrls {
     update_urls: Vec<(String, String)>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct QueryEpisodes {
     pub since: Option<Timestamp>,
     #[allow(dead_code)]
@@ -156,6 +156,7 @@ impl PodSync {
             [user] => {
                 assert_eq!(user.session_id, Some(session_str));
 
+                debug!("found user by session");
                 Ok(PodSyncAuthed {
                     sync: Arc::clone(self),
                     session_id,

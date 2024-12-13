@@ -1218,6 +1218,7 @@ dependencies = [
  "log",
  "pretty_env_logger",
  "serde",
+ "serde_json",
  "serde_with",
  "sha256",
  "sqlx",

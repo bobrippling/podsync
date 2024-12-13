@@ -1,5 +1,7 @@
 use std::{fmt, time};
 
+use ::time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use log::error;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,8 +41,6 @@ impl fmt::Display for Timestamp {
             return write!(fmt, "<epoch>");
         }
 
-        use ::time::{format_description::well_known::Rfc3339, OffsetDateTime};
-
         let formatted = OffsetDateTime::from_unix_timestamp(self.0)
             .ok()
             .and_then(|when| when.format(&Rfc3339).ok());
@@ -49,5 +49,18 @@ impl fmt::Display for Timestamp {
             Some(s) => write!(fmt, "{}", s),
             None => write!(fmt, "{}", self.0),
         }
+    }
+}
+
+impl std::str::FromStr for Timestamp {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        OffsetDateTime::parse(s, &Rfc3339)
+            .map(OffsetDateTime::unix_timestamp)
+            .map(Timestamp)
+            .map_err(|e| {
+                error!("couldn't parse {s:?} into Timestamp: {e:?}");
+            })
     }
 }
