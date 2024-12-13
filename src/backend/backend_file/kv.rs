@@ -21,7 +21,13 @@ pub fn read(input: impl Read, keys: &[&str]) -> Result<KeyValues, FindError> {
             FindError::Internal
         })?;
 
-        kv.insert(parts.0.into(), parts.1.into());
+        let (k, v) = parts;
+        if v.chars().next() != Some(' ') {
+            error!("invalid line - no whitespace after colon");
+            return Err(FindError::Internal);
+        }
+        let v = &v[1..];
+        kv.insert(k.into(), v.into());
     }
 
     Ok(kv)
