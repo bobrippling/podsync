@@ -25,6 +25,7 @@ pub enum DeviceType {
 }
 
 impl DeviceType {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Desktop => "Desktop",

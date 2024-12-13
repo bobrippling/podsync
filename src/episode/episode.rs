@@ -93,6 +93,7 @@ impl EpisodeRaw {
         }
     }
 
+    #[allow(dead_code)]
     pub fn id(&self) -> EpisodeId<'_> {
         EpisodeId {
             podcast: self.podcast.as_str(),

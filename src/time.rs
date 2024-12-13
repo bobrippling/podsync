@@ -13,7 +13,7 @@ pub struct Timestamp(i64);
 impl Timestamp {
     #[cfg(test)]
     pub fn now() -> Result<Self, time::SystemTimeError> {
-        Ok(Self::from_i64(25))
+        Ok(Self(25))
     }
 
     #[cfg(not(test))]
@@ -26,10 +26,12 @@ impl Timestamp {
             .map(Self)
     }
 
+    #[cfg(test)]
     pub fn from_i64(i: i64) -> Self {
         Self(i)
     }
 
+    #[allow(dead_code)]
     pub fn zero() -> Self {
         Self(0)
     }
