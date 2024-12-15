@@ -91,7 +91,10 @@ fn routes(
 
                     result_to_headers(async move {
                         let auth = match auth {
-                            Some(auth) => auth.with_path_username(&username),
+                            Some(auth) => auth.with_path_username(&username).map_err(|e| {
+                                error!("{e}");
+                                podsync::Error::Unauthorized
+                            }),
                             None => {
                                 error!("couldn't auth \"{username}\" - no auth header/cookie");
                                 Err(podsync::Error::Unauthorized)
@@ -369,7 +372,10 @@ fn login_authorize(
                 let podsync = Arc::clone(&podsync);
                 async move {
                     let username = username_fmt.convert(&username)?;
-                    let auth = auth.with_path_username(&username)?;
+                    let auth = auth.with_path_username(&username).map_err(|e| {
+                        error!("{e}");
+                        podsync::Error::Unauthorized
+                    })?;
                     podsync.login(auth, session_id).await
                 }
             },
