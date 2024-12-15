@@ -35,4 +35,3 @@ native-tls = ["sqlx/runtime-tokio-native-tls"]
 rustls = ["sqlx/runtime-tokio-rustls", "warp/tokio-rustls"]
 
 backend-sql = ["dep:sqlx"]
-backend-file = []

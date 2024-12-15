@@ -36,7 +36,6 @@ jobs:
           command: build
           args: >
             --release
-            --features backend-file
 
       - name: Build armv7 (file)
         uses: actions-rs/cargo@v1
@@ -44,7 +43,6 @@ jobs:
           command: build
           args: >
             --release
-            --features backend-file
             --target armv7-unknown-linux-gnueabihf
 
       - name: Create Release

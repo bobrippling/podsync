@@ -33,7 +33,6 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --features backend-file
 
       - name: Format
         uses: actions-rs/cargo@v1

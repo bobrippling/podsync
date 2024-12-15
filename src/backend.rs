@@ -9,7 +9,7 @@ mod backend_sql;
 #[cfg(feature = "backend-sql")]
 pub use backend_sql::*;
 
-#[cfg(feature = "backend-file")]
+#[cfg(not(feature = "backend-sql"))]
 mod backend_file;
-#[cfg(feature = "backend-file")]
+#[cfg(not(feature = "backend-sql"))]
 pub use backend_file::*;
