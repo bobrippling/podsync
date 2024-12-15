@@ -2,7 +2,6 @@ use std::str::FromStr;
 
 use base64_light::base64_decode;
 use log::error;
-use sha256::digest;
 use uuid::Uuid;
 
 use crate::podsync;
@@ -20,7 +19,7 @@ pub struct AuthAttempt {
 pub struct SessionId(Uuid);
 
 pub fn pwhash(s: &str) -> String {
-    digest(s)
+    sha256::digest(s)
 }
 
 impl BasicAuth {
