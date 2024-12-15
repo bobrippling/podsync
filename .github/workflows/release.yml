@@ -30,21 +30,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-arm-linux-gnueabihf
 
-      - name: Build x64
+      - name: Build x64 (file)
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: >
             --release
-            --features backend-sql
+            --features backend-file
 
-      - name: Build armv7
+      - name: Build armv7 (file)
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: >
             --release
-            --features backend-sql
+            --features backend-file
             --target armv7-unknown-linux-gnueabihf
 
       - name: Create Release
@@ -57,24 +57,63 @@ jobs:
           release_name: Release ${{ github.ref }}
           prerelease: false
 
-      - name: Upload x64 binary
-        id: upload-release-asset-x64
+      - name: Upload x64 binary (file backend)
+        id: upload-release-file-x64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: target/release/podsync
-          asset_name: podsync-x64
+          asset_name: podsync-file-x64
           asset_content_type: application/octet-stream
 
-      - name: Upload armv7 binary
-        id: upload-release-asset-armv7
+      - name: Upload armv7 binary (file backend)
+        id: upload-release-file-armv7
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: target/armv7-unknown-linux-gnueabihf/release/podsync
-          asset_name: podsync-armv7
+          asset_name: podsync-file-armv7
+          asset_content_type: application/octet-stream
+
+      - name: Build x64 (sql)
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: >
+            --release
+            --features backend-sql
+
+      - name: Build armv7 (sql)
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: >
+            --release
+            --features backend-sql
+            --target armv7-unknown-linux-gnueabihf
+
+      - name: Upload x64 binary (sql backend)
+        id: upload-release-sql-x64
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/release/podsync
+          asset_name: podsync-sql-x64
+          asset_content_type: application/octet-stream
+
+      - name: Upload armv7 binary (sql backend)
+        id: upload-release-sql-armv7
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: target/armv7-unknown-linux-gnueabihf/release/podsync
+          asset_name: podsync-sql-armv7
           asset_content_type: application/octet-stream
