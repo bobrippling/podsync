@@ -1,13 +1,13 @@
 use std::{result, str::FromStr, sync::Arc};
 
-use log::{error, info, trace};
+use log::{debug, error, info, trace};
 use serde::{Deserialize, Serialize};
 use warp::http;
 
 use crate::auth::{AuthAttempt, SessionId};
 use crate::backend::Backend;
 use crate::device::{DeviceAndSub, DeviceUpdate};
-use crate::episode::{Episode, Episodes};
+use crate::episode::{Episode, Episodes, Time};
 use crate::subscription::{SubscriptionChangesFromClient, SubscriptionChangesToClient};
 use crate::time::Timestamp;
 
@@ -27,7 +27,7 @@ pub struct UpdatedUrls {
     update_urls: Vec<(String, String)>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct QueryEpisodes {
     pub since: Option<Timestamp>,
     #[allow(dead_code)]
@@ -156,6 +156,7 @@ impl PodSync {
             [user] => {
                 assert_eq!(user.session_id, Some(session_str));
 
+                debug!("found user by session");
                 Ok(PodSyncAuthed {
                     sync: Arc::clone(self),
                     session_id,
@@ -190,6 +191,10 @@ impl PodSyncAuthed {
 }
 
 impl PodSyncAuthed<true> {
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
     pub async fn logout(&self) -> Result<()> {
         let username = &self.username;
         info!("{username} logout");
@@ -349,9 +354,10 @@ impl PodSyncAuthed<true> {
             })?;
 
         // workaround a bug in antennapod - populate the timestamp (EpisodeActionFilter.java:75)
+        let ep_time = Time::epoch();
         for ep in &mut episodes {
             if ep.timestamp.is_none() {
-                ep.timestamp = Some(Default::default());
+                ep.timestamp = Some(ep_time.clone());
             }
         }
 
@@ -399,7 +405,7 @@ impl PodSyncAuthed<true> {
 }
 
 #[derive(Debug)]
-#[cfg_attr(backend_sql, derive(sqlx::FromRow))]
+#[cfg_attr(feature = "backend-sql", derive(sqlx::FromRow))]
 pub struct Url {
     pub url: String,
     pub deleted: Option<Timestamp>,
@@ -423,6 +429,7 @@ impl UpdatedUrls {
 }
 
 #[cfg(test)]
+#[cfg(feature = "backend-sql")]
 mod test {
     use super::*;
 

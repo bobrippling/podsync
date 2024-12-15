@@ -14,8 +14,8 @@ use time::{
 #[sqlx(transparent)]
 pub struct Time(#[serde(with = "time_no_offset")] PrimitiveDateTime);
 
-impl Default for Time {
-    fn default() -> Self {
+impl Time {
+    pub fn epoch() -> Self {
         let dt = PrimitiveDateTime::new(date!(1970 - 01 - 01), time!(0:00));
         Self(dt)
     }
@@ -23,6 +23,7 @@ impl Default for Time {
 
 impl Time {
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn from_i64(i: i64) -> Self {
         use time::Time;
         let dt = PrimitiveDateTime::new(

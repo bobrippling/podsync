@@ -9,24 +9,25 @@ homepage = "https://github.com/bobrippling/podsync"
 repository = "https://github.com/bobrippling/podsync"
 
 [dependencies]
-tokio = { version = "1.33.0", features = ["full"] }
-serde = { version = "1.0.188", features = ["derive"] }
-serde_with = "3.3.0" # 2.3.1
-time = { version = "0.3.29", features = ["serde", "formatting", "parsing", "macros", "local-offset", "std"] }
-clap = { version = "4.4.6", features = ["derive"] }
+tokio = { version = "1.33", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_with = "3.3"
+serde_json = "1.0"
+time = { version = "0.3.35", features = ["serde", "formatting", "parsing", "macros", "local-offset", "std"] }
+clap = { version = "4.4", features = ["derive"] }
 
-log = "0.4.20"
-pretty_env_logger = "0.5.0"
+log = "0.4"
+pretty_env_logger = "0.5"
 
-cookie = "0.18.0"
-warp = "0.3.6"
+cookie = "0.18"
+warp = "0.3"
 
-sqlx = { version = "0.6.3", features = ["sqlite", "time", "offline"], optional = true }
+sqlx = { version = "0.6", features = ["sqlite", "time", "offline"], optional = true }
 # sqlx-cli
 
-base64_light = "0.1.5"
-sha256 = "1.4.0"
-uuid = { version = "1.4.1", features = ["v4"] }
+base64_light = "0.1"
+sha256 = "1.4"
+uuid = { version = "1.4", features = ["v4"] }
 
 [features]
 default = ["rustls"]

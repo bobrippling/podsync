@@ -17,21 +17,26 @@ jobs:
           override: true
           components: rustfmt, clippy
 
-      - name: Format
-        uses: actions-rs/cargo@v1
-        continue-on-error: true
-        with:
-          command: fmt
-          args: --all -- --check
-
-      - name: Check
+      - name: Check (SQL)
         uses: actions-rs/cargo@v1
         with:
           command: check
           args: --features backend-sql
 
-      - name: Test
+      - name: Test (SQL)
         uses: actions-rs/cargo@v1
         with:
           command: test
           args: --features backend-sql
+
+      - name: Check (file)
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --features backend-file
+
+      - name: Format
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
