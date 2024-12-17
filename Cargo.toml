@@ -29,8 +29,10 @@ base64_light = "0.1"
 sha256 = "1.4"
 uuid = { version = "1.4", features = ["v4"] }
 
+fs-lock = { version = "0.1", optional = true }
+
 [features]
-default = ["rustls"]
+default = ["rustls", "dep:fs-lock"]
 native-tls = ["sqlx/runtime-tokio-native-tls"]
 rustls = ["sqlx/runtime-tokio-rustls", "warp/tokio-rustls"]
 
