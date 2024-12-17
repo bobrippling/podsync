@@ -7,6 +7,7 @@ use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::PathBuf;
 
 use log::{error, info, warn};
+use fs_lock::FileLock;
 
 use crate::backend::FindError;
 
@@ -382,13 +383,13 @@ impl Backend {
 
         let mut eps = vec![];
 
-        for line in BufReader::new(file).lines() {
+        for (i, line) in BufReader::new(file).lines().enumerate() {
             let line = line.map_err(|e| {
                 error!("read \"{path:?}\": {e:?}");
             })?;
 
             let ep = serde_json::from_str(&line).map_err(|e| {
-                error!("couldn't parse episode line for {username}");
+                error!("couldn't parse episode line {i} for {username}");
             })?;
             eps.push(ep);
         }
@@ -402,6 +403,12 @@ impl Backend {
         now: Timestamp,
         changes: Vec<Episode>,
     ) -> Result<(), ()> {
+        let file = todo!();
+        let lock = FileLock::new_exclusive(file)
+            .map_err(|e| {
+                error!("couldn't lock {}: {e:?}", path);
+            })?;
+
         let mut eps = self.episodes(username, &QueryEpisodes::default()).await?;
 
         for change in changes {
