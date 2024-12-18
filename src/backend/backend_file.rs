@@ -65,7 +65,11 @@ impl Backend {
     }
 
     fn write(&self, path: PathBuf, keyvalues: &KeyValues) -> Result<(), std::io::Error> {
-        let file = OpenOptions::new().write(true).create(true).open(path)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?;
 
         kv::write(file, keyvalues)
     }
@@ -232,6 +236,7 @@ impl Backend {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(path)
             .map_err(|e| {
                 error!("couldn't open \"{username}\"'s devices: {e:?}");
@@ -347,6 +352,7 @@ impl Backend {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(path)
             .map_err(|e| {
                 error!("couldn't open \"{username}\"'s subs: {e:?}");
@@ -426,6 +432,7 @@ impl Backend {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(path)
             .map_err(|e| {
                 error!("couldn't open \"{username}\"'s episodes: {e:?}");
