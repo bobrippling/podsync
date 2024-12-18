@@ -55,6 +55,11 @@ async fn main() {
 
     let args = <Args as clap::Parser>::parse();
 
+    if args.show_version() {
+        println!("PodSync {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     backend::init().await;
     let backend = Backend::new().await;
 

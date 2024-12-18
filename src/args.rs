@@ -17,6 +17,10 @@ pub struct Args {
     /// The port podsync listens on.
     #[arg(short, long, default_value_t = 80)]
     port: u16,
+
+    /// Emit the podsync version
+    #[arg(short, long)]
+    version: bool,
 }
 
 impl Args {
@@ -30,5 +34,9 @@ impl Args {
 
     pub fn secure(&self) -> bool {
         self.secure
+    }
+
+    pub fn show_version(&self) -> bool {
+        self.version
     }
 }
