@@ -20,15 +20,21 @@ if test -r /etc/default/podsync; then
 fi
 
 binary=/usr/local/bin/podsync
+log=/var/log/podsync/podsync.log
 
 status(){
 	status_of_proc "podsync" "podsync service" && exit 0 || exit $?
 }
 
+emit_log(){
+	echo "$(date '+%Y-%m-%d %H:%M:%S'): $0: $*" >>"$log"
+}
+
 start(){
+	emit_log "starting"
 	RUST_LOG=podsync=info \
 	start-stop-daemon --exec "$binary" --start --chuid www-data:www-data \
-		--background --output /var/log/podsync/podsync.log \
+		--background --output "$log" \
 		--chdir "$DIR" \
 		-- \
 		--address "$ADDR" --port "$PORT" $FLAGS
@@ -36,6 +42,7 @@ start(){
 
 stop(){
 	start-stop-daemon --exec "$binary" --stop --user www-data
+	emit_log "stopped"
 }
 
 setup(){
