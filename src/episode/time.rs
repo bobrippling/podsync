@@ -6,9 +6,7 @@ use time::{
 
 // this struct exists to work around #[serde(with = ...)]
 // not handling Option for us
-#[derive(Debug, Clone, Hash)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(transparent)]
 #[derive(sqlx::Type)]
 #[sqlx(transparent)]

@@ -29,14 +29,6 @@ impl Episode {
         Hash::hash(self, &mut hasher);
         hasher.finish().to_string()
     }
-
-    #[allow(dead_code)]
-    pub fn id(&self) -> EpisodeId<'_> {
-        EpisodeId {
-            podcast: self.podcast.as_str(),
-            episode: self.episode.as_str(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -64,6 +56,7 @@ pub struct EpisodeRaw {
 pub struct EpisodeId<'e> {
     podcast: &'e str,
     episode: &'e str,
+    timestamp: Option<&'e Time>,
 }
 
 impl EpisodeRaw {
@@ -98,6 +91,7 @@ impl EpisodeRaw {
         EpisodeId {
             podcast: self.podcast.as_str(),
             episode: self.episode.as_str(),
+            timestamp: self.timestamp.as_ref(),
         }
     }
 }
