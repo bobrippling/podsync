@@ -1365,7 +1365,7 @@ checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
 
 [[package]]
 name = "podsync"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "base64_light",
  "clap",
