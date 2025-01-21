@@ -8,8 +8,7 @@ use time::{
 // not handling Option for us
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(transparent)]
-#[derive(sqlx::Type)]
-#[sqlx(transparent)]
+#[cfg_attr(feature = "backend-sql", derive(sqlx::Type), sqlx(transparent))]
 pub struct Time(#[serde(with = "time_no_offset")] PrimitiveDateTime);
 
 impl Time {

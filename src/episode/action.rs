@@ -15,7 +15,8 @@ pub enum EpisodeAction {
     Delete,
 }
 
-#[derive(Debug, Deserialize, Serialize, sqlx::Type)]
+#[derive(Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "backend-sql", derive(sqlx::Type))]
 #[serde(rename_all = "lowercase")]
 pub enum EpisodeActionRaw {
     New,

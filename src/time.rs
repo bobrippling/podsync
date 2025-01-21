@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-#[derive(sqlx::Type)]
-#[sqlx(transparent)]
+#[cfg_attr(feature = "backend-sql", derive(sqlx::Type), sqlx(transparent))]
 pub struct Timestamp(i64);
 
 impl Timestamp {

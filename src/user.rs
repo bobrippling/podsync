@@ -1,4 +1,5 @@
-#[derive(Debug, sqlx::Type)]
+#[derive(Debug)]
+#[cfg_attr(feature = "backend-sql", derive(sqlx::Type))]
 pub struct User {
     pub username: String,
     pub pwhash: String,

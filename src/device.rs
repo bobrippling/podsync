@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, sqlx::Type, Serialize)]
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "backend-sql", derive(sqlx::Type))]
 pub struct DeviceAndSub {
     pub id: String,
     pub caption: String,
@@ -14,7 +15,8 @@ pub struct DeviceUpdate {
     pub r#type: Option<DeviceType>,
 }
 
-#[derive(Debug, Deserialize, Serialize, sqlx::Type, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[cfg_attr(feature = "backend-sql", derive(sqlx::Type))]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceType {
     Desktop,

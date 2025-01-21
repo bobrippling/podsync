@@ -1,4 +1,5 @@
-#![deny(unexpected_cfgs)]
+#![cfg_attr(feature = "backend-sql", allow(unexpected_cfgs))]
+#![cfg_attr(not(feature = "backend-sql"), deny(unexpected_cfgs))]
 
 use std::{future::Future, sync::Arc};
 

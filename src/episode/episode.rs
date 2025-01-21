@@ -34,7 +34,7 @@ impl Episode {
 #[derive(Debug)]
 #[serde_with::skip_serializing_none]
 #[derive(Deserialize, Serialize)] // transitive, from Episode
-#[derive(sqlx::Type)]
+#[cfg_attr(feature = "backend-sql", derive(sqlx::Type))]
 pub struct EpisodeRaw {
     pub device: Option<String>,
     pub podcast: String,
