@@ -44,6 +44,14 @@ See the [log crate] for more details
 
 # Building
 
+## Modes
+
+podsync has two backends: SQL database or plain text files. The former being more scalable, the latter being easier to inspect and manipulate with Unix tools.
+
+By default it builds in file mode, to build in sql mode, build with `cargo build --features backend-sql`.
+
+## SQLx offline build
+
 podsync uses sqlx in [offline mode] for builds (see [`build.rs`](./build.rs) for more).
 
 To update the schema:
