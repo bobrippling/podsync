@@ -1,6 +1,6 @@
 [package]
 name = "podsync"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 
 description = "A server to sync podcasts with, mirroring the gpodder API. Designed for use with AntennaPod"
