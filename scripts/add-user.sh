@@ -32,5 +32,5 @@ hash=$(printf '%s' "$pass" | sha_hash)
 
 sqlite3 pod.sql <<!
 INSERT INTO users
-VALUES ("$user", "$hash", NULL);
+VALUES ('$user', '$hash', NULL);
 !
