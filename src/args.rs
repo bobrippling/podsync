@@ -17,7 +17,7 @@ pub struct Args {
     #[arg(short, long)]
     address: Option<String>,
 
-    /// The location of the data directory. By default 
+    /// The location of the data directory. By default
     /// this is the current working directory.
     #[arg(short, long)]
     data_dir: Option<PathBuf>,
