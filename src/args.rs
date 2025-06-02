@@ -1,4 +1,7 @@
-use std::{net::{AddrParseError, IpAddr, SocketAddr}, path::PathBuf};
+use std::{
+    net::{AddrParseError, IpAddr, SocketAddr},
+    path::PathBuf,
+};
 
 use clap::Parser;
 
@@ -43,5 +46,9 @@ impl Args {
 
     pub fn show_version(&self) -> bool {
         self.version
+    }
+
+    pub fn data_dir(&self) -> Option<PathBuf> {
+        self.data_dir.clone()
     }
 }
