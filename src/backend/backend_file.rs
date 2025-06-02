@@ -24,12 +24,13 @@ pub struct Backend {
     root: PathBuf,
 }
 
-pub async fn init() {}
+// Change introduced to match function signature with backend_sql
+pub async fn init(data_dir: &PathBuf) {}
 
 impl Backend {
-    pub async fn new() -> Self {
+    pub async fn new(path: &PathBuf) -> Self {
         Self {
-            root: PathBuf::from("."),
+            root: path.to_path_buf(),
         }
     }
 }
