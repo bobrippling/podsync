@@ -60,9 +60,9 @@ async fn main() {
         println!("PodSync {}", env!("CARGO_PKG_VERSION"));
         return;
     }
-    let mut data_dir = args.data_dir().unwrap_or_else(|| Path::new("."));
+    let data_dir = args.data_dir().unwrap_or_else(|| Path::new("."));
 
-    let backend = Backend::new(&mut data_dir).await;
+    let backend = Backend::new(&data_dir).await;
 
     let secure = args.secure();
     let podsync = Arc::new(PodSync::new(backend));
