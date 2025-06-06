@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use sqlx::{migrate::MigrateDatabase, query, query_as, Pool, Sqlite, SqlitePool, Transaction};
 
@@ -17,18 +17,18 @@ type Result<T> = std::result::Result<T, ()>;
 
 pub struct Backend(pub Pool<Sqlite>);
 
-pub async fn init(data_dir: &PathBuf) {
-    let mut final_path = data_dir.clone();
-    final_path.push("pod.sql");
-    let final_path_str: String;
-    if let Some(path) = final_path.to_str() {
-        final_path_str = format!("sqlite://{}", path);
-    } else {
-        panic!("An issue occurred while parsing the sqlite db path");
-    }
-    match Sqlite::create_database(&final_path_str).await {
+fn into_sql(path: &Path) -> PathBuf {
+    path.join("pod.sql")
+}
+
+pub async fn init(data_dir: &Path) {
+    let final_path = format!(
+        "sqlite://{}",
+        into_sql(data_dir).to_str().expect("non utf-8 data")
+    );
+    match Sqlite::create_database(&final_path).await {
         Ok(()) => {
-            info!("Using {}", &final_path_str);
+            info!("Using {}", &final_path);
         }
         Err(e) => {
             let sqlx::Error::Database(db_err) = e else {
@@ -41,15 +41,16 @@ pub async fn init(data_dir: &PathBuf) {
 }
 
 impl Backend {
-    pub async fn new(data_dir_path: &mut PathBuf) -> Self {
-        let db_path = data_dir_path;
-        db_path.push("pod.sql");
-        let path_str = if let Some(path_str) = db_path.to_str() {
-            path_str
-        } else {
-            panic!("the database path cannot be converted into a string!")
+    pub async fn new(data_dir: &Path) -> Self {
+        let db_pathbuf = into_sql(data_dir);
+        let db_path = db_pathbuf.to_str().expect("non utf-8 data");
+        let pool = match SqlitePool::connect(db_path).await {
+            Ok(pool) => pool,
+            Err(_err) => {
+                init(data_dir).await;
+                SqlitePool::connect(db_path).await.expect("db connection")
+            }
         };
-        let pool = SqlitePool::connect(path_str).await.expect("db connection");
 
         sqlx::migrate!("./migrations")
             .run(&pool)

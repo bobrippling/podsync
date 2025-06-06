@@ -1,6 +1,6 @@
 use std::{
     net::{AddrParseError, IpAddr, SocketAddr},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use clap::Parser;
@@ -48,7 +48,7 @@ impl Args {
         self.version
     }
 
-    pub fn data_dir(&self) -> Option<PathBuf> {
-        self.data_dir.clone()
+    pub fn data_dir(&self) -> Option<&Path> {
+        self.data_dir.as_deref()
     }
 }
