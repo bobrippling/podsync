@@ -1,7 +1,7 @@
 #![cfg_attr(feature = "backend-sql", allow(unexpected_cfgs))]
 #![cfg_attr(not(feature = "backend-sql"), deny(unexpected_cfgs))]
 
-use std::{future::Future, sync::Arc};
+use std::{future::Future, path::Path, sync::Arc};
 
 use ::time::ext::NumericalDuration;
 use cookie::{Cookie, SameSite};
@@ -60,9 +60,9 @@ async fn main() {
         println!("PodSync {}", env!("CARGO_PKG_VERSION"));
         return;
     }
+    let data_dir = args.data_dir().unwrap_or_else(|| Path::new("."));
 
-    backend::init().await;
-    let backend = Backend::new().await;
+    let backend = Backend::new(&data_dir).await;
 
     let secure = args.secure();
     let podsync = Arc::new(PodSync::new(backend));

@@ -1,4 +1,7 @@
-use std::net::{AddrParseError, IpAddr, SocketAddr};
+use std::{
+    net::{AddrParseError, IpAddr, SocketAddr},
+    path::{Path, PathBuf},
+};
 
 use clap::Parser;
 
@@ -13,6 +16,11 @@ pub struct Args {
     /// podsync will listen just on the IPv4 loopback.
     #[arg(short, long)]
     address: Option<String>,
+
+    /// The location of the data directory. By default
+    /// this is the current working directory.
+    #[arg(short, long)]
+    data_dir: Option<PathBuf>,
 
     /// The port podsync listens on.
     #[arg(short, long, default_value_t = 80)]
@@ -38,5 +46,9 @@ impl Args {
 
     pub fn show_version(&self) -> bool {
         self.version
+    }
+
+    pub fn data_dir(&self) -> Option<&Path> {
+        self.data_dir.as_deref()
     }
 }

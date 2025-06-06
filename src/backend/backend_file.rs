@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use log::{error, info, warn};
 
@@ -24,12 +24,10 @@ pub struct Backend {
     root: PathBuf,
 }
 
-pub async fn init() {}
-
 impl Backend {
-    pub async fn new() -> Self {
+    pub async fn new(path: &Path) -> Self {
         Self {
-            root: PathBuf::from("."),
+            root: path.to_path_buf(),
         }
     }
 }
