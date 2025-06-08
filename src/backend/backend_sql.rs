@@ -1,11 +1,11 @@
 use std::future::Future;
+use std::path::{Path, PathBuf};
 
 use sqlx::{migrate::MigrateDatabase, query, query_as, Pool, Sqlite, SqlitePool, Transaction};
 
 use log::{error, info};
 
 use crate::backend::FindError;
-
 use crate::device::{DeviceAndSub, DeviceUpdate};
 use crate::episode::{Episode, EpisodeRaw};
 use crate::podsync::{QueryEpisodes, Url};
@@ -15,14 +15,20 @@ use crate::Timestamp;
 
 type Result<T> = std::result::Result<T, ()>;
 
-static DB_URL: &str = "sqlite://pod.sql";
-
 pub struct Backend(pub Pool<Sqlite>);
 
-pub async fn init() {
-    match Sqlite::create_database(DB_URL).await {
+fn into_sql(path: &Path) -> PathBuf {
+    path.join("pod.sql")
+}
+
+async fn init(data_dir: &Path) {
+    let final_path = format!(
+        "sqlite://{}",
+        into_sql(data_dir).to_str().expect("non utf-8 data")
+    );
+    match Sqlite::create_database(&final_path).await {
         Ok(()) => {
-            info!("Using {}", DB_URL);
+            info!("Using {}", &final_path);
         }
         Err(e) => {
             let sqlx::Error::Database(db_err) = e else {
@@ -35,8 +41,16 @@ pub async fn init() {
 }
 
 impl Backend {
-    pub async fn new() -> Self {
-        let pool = SqlitePool::connect(DB_URL).await.expect("db connection");
+    pub async fn new(data_dir: &Path) -> Self {
+        let db_pathbuf = into_sql(data_dir);
+        let db_path = db_pathbuf.to_str().expect("non utf-8 data");
+        let pool = match SqlitePool::connect(db_path).await {
+            Ok(pool) => pool,
+            Err(_err) => {
+                init(data_dir).await;
+                SqlitePool::connect(db_path).await.expect("db connection")
+            }
+        };
 
         sqlx::migrate!("./migrations")
             .run(&pool)
