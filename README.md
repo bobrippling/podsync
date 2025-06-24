@@ -6,6 +6,19 @@ A HTTP server for syncing podcast app state, mirroring the [gpodder API]. Design
 [AntennaPod]: https://github.com/AntennaPod/AntennaPod
 [sync service]: https://github.com/AntennaPod/AntennaPod/blob/24d1a06662c8eec31f3a4c3ebdcd3aea759fb63a/core/src/main/java/de/danoeh/antennapod/core/sync/SyncService.java
 
+# Setup
+
+## Creating Users
+
+Add a user with `scripts/add-user.sh`:
+
+```sh
+$ ./scripts/add-user.sh yourname
+yourname's pass: <enter password>
+```
+
+This will add a user into the database, assumed to be `pod.sql`.
+
 # Endpoints
 
 podsync doesn't cover the [full gpodder API], just enough to get AntennaPod to work:
