@@ -76,3 +76,7 @@ git commit -m 'Update sqlx snapshot' sqlx-data.json
 ```
 
 [offline mode]: https://docs.rs/sqlx/latest/sqlx/macro.query.html#offline-mode-requires-the-offline-feature
+
+## Docker
+
+An unofficial [Docker image exists](https://github.com/OpenByteDev/podsync-docker), maintained by OpenByteDev
