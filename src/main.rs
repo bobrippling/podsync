@@ -11,7 +11,7 @@ use warp::{
         self,
         header::{HeaderMap, HeaderValue},
     },
-    hyper::Body,
+    //hyper::Body,
     Filter, Rejection, Reply,
 };
 
@@ -307,7 +307,7 @@ where
                 }
             }
 
-            resp.body(Body::empty()).unwrap()
+            resp.body(())/*Body::empty())*/.unwrap()
         }
         Err(e) => err_to_warp(e).into_response(),
     }
