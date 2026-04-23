@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO devices\n            (id, username, caption, type)\n            VALUES\n            (?, ?, ?, ?)\n            ON CONFLICT\n            DO\n                UPDATE SET\n                    caption = coalesce(?, devices.caption),\n                    type = coalesce(?, devices.type)\n                WHERE id = ? AND username = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "9e6dec71348701a9b6f9fc4b848aad31d654d1ff7c42cb49f4155cad1866618c"
+}

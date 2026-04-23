@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT url,\n                deleted as \"deleted: _\",\n                created as \"created!: _\"\n            FROM subscriptions\n            WHERE username = ?\n                AND device = ?\n                AND (\n                    created > ? OR deleted > ?\n                )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "url",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "deleted: _",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created!: _",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "3fb9d968e52bdbfc981705fd91aa8b6b2c3d573a2e7dce7fe9652c1913a2f5bd"
+}

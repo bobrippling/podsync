@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    UPDATE subscriptions\n                    SET\n                        deleted = ?\n                    WHERE username = ?\n                        AND device = ?\n                        AND url = ?\n                        AND deleted IS NULL\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "498016c291834ae5044f5ba0318ab3779bb0c01e0abedc0b5d40f0a6346f21c8"
+}

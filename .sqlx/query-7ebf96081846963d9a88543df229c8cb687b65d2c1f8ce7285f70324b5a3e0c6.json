@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO episodes\n            (\n                username, device,\n                podcast, episode,\n                timestamp, guid,\n                action,\n                started, position, total,\n                modified\n            )\n            VALUES\n            (\n                ?, ?,\n                ?, ?,\n                NULL, NULL,\n                \"New\",\n                NULL, NULL, NULL,\n                1 -- `modified` value we expect to be overwritten\n                -- `hash` is defaulted to \"\"\n            ),\n            (\n                \"u2\", \"dev2\", -- this row won't be picked up - different user\n                \"pod2\", \"ep2\",\n                NULL, NULL,\n                \"New\",\n                NULL, NULL, NULL,\n                2\n            )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "7ebf96081846963d9a88543df229c8cb687b65d2c1f8ce7285f70324b5a3e0c6"
+}

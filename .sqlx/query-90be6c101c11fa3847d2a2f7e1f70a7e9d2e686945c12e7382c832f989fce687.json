@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, caption as \"caption!: _\", type as \"type!: _\", COUNT(*) as \"subscriptions!: _\"\n            FROM devices\n            INNER JOIN subscriptions\n                ON devices.username = subscriptions.username\n            GROUP BY devices.username, devices.id\n            HAVING devices.username = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "caption!: _",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "type!: _",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "subscriptions!: _",
+        "ordinal": 3,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "90be6c101c11fa3847d2a2f7e1f70a7e9d2e686945c12e7382c832f989fce687"
+}

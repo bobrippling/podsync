@@ -71,7 +71,6 @@ impl Backend {
             error!("error beginning transaction: {:?}", e);
         })?;
 
-        // could probably pass &mut *tx here
         let (tx, r) = transaction(tx).await?;
 
         tx.commit().await.map_err(|e| {
@@ -420,7 +419,7 @@ impl Backend {
                     // update where
                     hash,
                 )
-                .execute(&mut tx)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| {
                     error!("error querying mid-transaction: {:?}", e);

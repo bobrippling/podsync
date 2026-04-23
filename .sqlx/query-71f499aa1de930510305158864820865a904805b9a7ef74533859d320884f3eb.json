@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT modified as \"modified: _\", content_hash as \"hash!: _\"\n                FROM episodes\n                WHERE username = \"u2\"\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "modified: _",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "hash!: _",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "71f499aa1de930510305158864820865a904805b9a7ef74533859d320884f3eb"
+}

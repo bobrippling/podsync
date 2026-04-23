@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    INSERT INTO episodes\n                    (\n                        username, device,\n                        podcast, episode,\n                        timestamp, guid,\n                        action,\n                        started, position, total,\n                        modified\n                    )\n                    VALUES\n                    (\n                        ?, ?,\n                        ?, ?,\n                        ?, ?,\n                        ?,\n                        ?, ?, ?,\n                        ?\n                    )\n                    ON CONFLICT\n                    DO\n                        UPDATE SET\n                            timestamp = coalesce(?, episodes.timestamp),\n                            guid = coalesce(?, episodes.guid),\n                            action = coalesce(?, episodes.action),\n                            started = coalesce(?, episodes.started),\n                            position = coalesce(?, episodes.position),\n                            total = coalesce(?, episodes.total),\n                            modified = ?,\n                            content_hash = ?\n                        -- only update if we've changed the contents\n                        WHERE content_hash <> ?\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 20
+    },
+    "nullable": []
+  },
+  "hash": "91fec3ed5f2965fc18eda1d7f9fea8dbff81d91b9e15b055914c5e6a063cb21e"
+}

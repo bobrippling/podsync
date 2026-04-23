@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT *\n            FROM users\n            WHERE session_id = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "username",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "pwhash",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "session_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f2909b05f07252d28cf3cf9f14d2a88a4e2805d3f012794ac7eca6250de084a5"
+}

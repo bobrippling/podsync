@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                    INSERT INTO subscriptions\n                    (username, device, url, created)\n                    VALUES\n                    (?, ?, ?, ?) -- `deleted` <- NULL\n                    ON CONFLICT\n                    DO NOTHING\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "b276f81a7c3c206c558d6d5def3ffb19cf7bb46ad738e6c262ba3b592dd553e1"
+}

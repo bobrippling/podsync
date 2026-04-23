@@ -16,7 +16,7 @@ fn main() {
     match env::var("DATABASE_URL") {
         Ok(url) => use_db(url),
         Err(VarError::NotPresent) => {
-            println!("cargo:warning={}", "using `sqlx-data.json` for schema");
+            println!("cargo:warning={}", "using .sqlx/ for schema");
             use_json()
         }
         Err(e) => panic!("$DATABASE_URL: {e:?}"),

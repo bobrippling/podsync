@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT episodes.podcast, episode,\n                guid, episodes.device,\n                timestamp as \"timestamp: _\",\n                action as \"action!: _\",\n                started, position, total,\n                modified as \"modified?: _\"\n            FROM\n                episodes,\n                (SELECT ? as podcast, ? as device) as filter\n            WHERE username = ?\n                AND modified > ?\n                AND (filter.podcast IS NULL OR filter.podcast = episodes.podcast)\n                AND (filter.device IS NULL OR filter.device = episodes.device)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "podcast",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "episode",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "guid",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "device",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "timestamp: _",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "action!: _",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "started",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "position",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "modified?: _",
+        "ordinal": 9,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "57d484d4581d50a8d41a914e79e6a0870f73f7915acbe7ba84783bcf15aaadc6"
+}

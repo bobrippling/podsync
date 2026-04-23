@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE episodes SET modified = 23 WHERE username = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "5b0366048dc4ec797b64826150a81df48540307e98d91d8d84d4045b7f7da76f"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE users\n            SET session_id = ?\n            WHERE username = ?\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "d8efd2d5bcf76f9fdd7e7ad475963148eacd57d4e3415c42508c932b5b516769"
+}
