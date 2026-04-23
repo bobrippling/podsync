@@ -136,7 +136,7 @@ async fn login(
         .secure(state.secure)
         .http_only(true)
         .same_site(SameSite::Strict)
-        .max_age(2i64.weeks())
+        .max_age(2.weeks())
         .path("/api");
 
     let cookie_val =
@@ -236,7 +236,7 @@ fn extract_session_id(headers: &HeaderMap) -> Option<SessionId> {
         let part = part.trim();
         if let Some((name, value)) = part.split_once('=') {
             if name.trim() == COOKIE_NAME {
-                if let Ok(session_id) = value.trim().parse::<SessionId>() {
+                if let Ok(session_id) = value.trim().parse() {
                     return Some(session_id);
                 }
             }
