@@ -1,8 +1,11 @@
 use std::{result, str::FromStr, sync::Arc};
 
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use log::{debug, error, info, trace};
 use serde::{Deserialize, Serialize};
-use warp::http;
 
 use crate::auth::{AuthAttempt, SessionId};
 use crate::backend::Backend;
@@ -45,17 +48,16 @@ pub enum Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
-impl Into<http::StatusCode> for Error {
-    fn into(self) -> http::StatusCode {
-        match self {
-            Self::Internal => http::StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Unauthorized => http::StatusCode::UNAUTHORIZED,
-            Self::BadRequest => http::StatusCode::BAD_REQUEST,
-        }
+impl IntoResponse for Error {
+    fn into_response(self) -> Response {
+        let status = match self {
+            Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::BadRequest => StatusCode::BAD_REQUEST,
+        };
+        status.into_response()
     }
 }
-
-impl warp::reject::Reject for Error {}
 
 impl PodSync {
     pub fn new(backend: Backend) -> Self {
@@ -182,8 +184,7 @@ impl PodSyncAuthed {
         } else {
             error!(
                 "mismatching session & username: session={{ username: {}, session_id: {} }}, username={username}",
-                self.username,
-                self.session_id,
+                self.username, self.session_id,
             );
             Err(Error::Unauthorized)
         }

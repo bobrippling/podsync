@@ -1,21 +1,20 @@
 #![cfg_attr(feature = "backend-sql", allow(unexpected_cfgs))]
 #![cfg_attr(not(feature = "backend-sql"), deny(unexpected_cfgs))]
 
-use std::{future::Future, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 
 use ::time::ext::NumericalDuration;
-use cookie::{Cookie, SameSite};
-use serde::{Deserialize, Serialize};
-use warp::{
-    http::{
-        self,
-        header::{HeaderMap, HeaderValue},
-    },
-    hyper::Body,
-    Filter, Rejection, Reply,
+use axum::{
+    extract::{Path as AxumPath, Query, Request, State},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
+    middleware::{self, Next},
+    response::{Json, Response},
+    routing::{get, post},
+    Router,
 };
-
+use cookie::{Cookie, SameSite};
 use log::{debug, error, info};
+use serde::Deserialize;
 
 mod auth;
 use auth::{BasicAuth, SessionId};
@@ -50,6 +49,12 @@ pub struct QuerySince {
     since: crate::time::Timestamp,
 }
 
+#[derive(Clone)]
+struct AppState {
+    podsync: Arc<PodSync>,
+    secure: bool,
+}
+
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
@@ -67,346 +72,282 @@ async fn main() {
     let secure = args.secure();
     let podsync = Arc::new(PodSync::new(backend));
 
-    let routes = routes(podsync, secure);
+    let app = routes(podsync, secure);
 
-    warp::serve(routes)
-        .run(args.addr().expect("couldn't parse address"))
-        .await;
+    let addr = args.addr().expect("couldn't parse address");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("couldn't bind");
+    axum::serve(listener, app).await.expect("server error");
 }
 
-fn routes(
-    podsync: Arc<PodSync>,
-    secure: bool,
-) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone + Sync + Send {
-    let hello = warp::path::end()
-        .and(warp::get())
-        .map(|| "PodSync is Working!");
+fn routes(podsync: Arc<PodSync>, secure: bool) -> Router {
+    let state = AppState { podsync, secure };
 
-    let auth = {
-        let login = warp::post()
-            .and(warp::path!("api" / "2" / "auth" / String / "login.json"))
-            .and(warp::header::optional("authorization"))
-            .and(warp::cookie::optional(COOKIE_NAME))
-            .then({
-                let podsync = Arc::clone(&podsync);
-                move |username: String, auth: Option<BasicAuth>, session_id: Option<SessionId>| {
-                    let podsync = Arc::clone(&podsync);
-
-                    result_to_headers(async move {
-                        let auth = match auth {
-                            Some(auth) => auth.with_path_username(&username).map_err(|e| {
-                                error!("{e}");
-                                podsync::Error::Unauthorized
-                            }),
-                            None => {
-                                error!("couldn't auth \"{username}\" - no auth header/cookie");
-                                Err(podsync::Error::Unauthorized)
-                            }
-                        }?;
-
-                        let podsync = podsync.login(auth, session_id).await?;
-                        let session_id = podsync.session_id();
-
-                        let cookie = Cookie::build((COOKIE_NAME, session_id.to_string()))
-                            .secure(secure)
-                            .http_only(true)
-                            .same_site(SameSite::Strict)
-                            .max_age(2.weeks())
-                            .path("/api");
-
-                        let cookie = HeaderValue::from_str(&cookie.to_string())
-                            .map_err(|_| podsync::Error::Internal)?;
-                        let mut headers = HeaderMap::new();
-                        headers.insert("set-cookie", cookie);
-                        Ok(headers)
-                    })
-                }
-            });
-
-        let logout = warp::post()
-            .and(warp::path!(
-                "api" / "2" / "auth" / .. /* String / "logout.json" */
-            ))
-            .and(authorize(UsernameFormat::Name, podsync.clone()))
-            .and(warp::path::path("logout.json").and(warp::path::end()))
-            .then(move |podsync: PodSyncAuthed<true>| {
-                result_to_ok(async move { podsync.logout().await })
-            });
-
-        login.or(logout)
-    };
-
-    let devices = {
-        let for_user = warp::path!("api" / "2" / "devices" / .. /* String */)
-            .and(warp::get())
-            .and(authorize(UsernameFormat::NameJson, podsync.clone()))
-            .and(warp::path::end())
-            .then(|podsync: PodSyncAuthed<true>| {
-                result_to_json(async move {
-                    let devs = podsync.devices().await?;
-
-                    Ok(devs)
-                })
-            });
-
-        let update = warp::path!("api" / "2" / "devices" / .. /* String / String */)
-            .and(warp::post())
-            .and(authorize(UsernameFormat::Name, podsync.clone()))
-            .and(warp::path::param::<String>().and(warp::path::end()))
-            .and(warp::body::json())
-            .then(
-                move |podsync: PodSyncAuthed<true>, deviceid_format: String, device| {
-                    result_to_ok(async move {
-                        let device_id = split_format_json(&deviceid_format)?;
-                        podsync.update_device(device_id, device).await
-                    })
-                },
-            );
-
-        for_user.or(update)
-    };
-
-    let subscriptions = {
-        let get = warp::path!("api" / "2" / "subscriptions" / .. /* String / String*/)
-            .and(warp::get())
-            .and(authorize(UsernameFormat::Name, podsync.clone()))
-            .and(warp::path::param::<String>().and(warp::path::end()))
-            .and(warp::query())
-            .then(
-                move |podsync: PodSyncAuthed<true>, deviceid_format: String, query: QuerySince| {
-                    result_to_json(async move {
-                        let device_id = split_format_json(&deviceid_format)?;
-                        podsync.subscriptions(device_id, query.since).await
-                    })
-                },
-            );
-
-        let upload = warp::path!("api" / "2" / "subscriptions" / .. /* String / String */)
-            .and(warp::post())
-            .and(authorize(UsernameFormat::Name, podsync.clone()))
-            .and(warp::path::param::<String>().and(warp::path::end()))
-            .and(warp::body::json())
-            .then(
-                move |podsync: PodSyncAuthed<true>, deviceid_format: String, changes| {
-                    result_to_json(async move {
-                        let device_id = split_format_json(&deviceid_format)?;
-
-                        podsync.update_subscriptions(device_id, changes).await
-                    })
-                },
-            );
-
-        get.or(upload)
-    };
-
-    let episodes = {
-        let get = warp::path!("api" / "2" / "episodes" / .. /* String */)
-            .and(warp::get())
-            .and(authorize(UsernameFormat::NameJson, podsync.clone()))
-            .and(warp::path::end())
-            .and(warp::query())
-            .then(
-                move |podsync: PodSyncAuthed<true>, query: podsync::QueryEpisodes| {
-                    result_to_json(async move { podsync.episodes(query).await })
-                },
-            );
-
-        let upload = warp::path!("api" / "2" / "episodes" / .. /* String */)
-            .and(warp::post())
-            .and(authorize(UsernameFormat::NameJson, podsync.clone()))
-            .and(warp::path::end())
-            .and(warp::body::json())
-            .then(move |podsync: PodSyncAuthed<true>, body| {
-                result_to_json(async move { podsync.update_episodes(body).await })
-            });
-
-        get.or(upload)
-    };
-
-    hello
-        .or(auth)
-        .or(devices)
-        .or(subscriptions)
-        .or(episodes)
-        .with(warp::log::custom(|info| {
-            use std::fmt::*;
-
-            struct OptFmt<T>(Option<T>);
-
-            impl<T: Display> Display for OptFmt<T> {
-                fn fmt(&self, fmt: &mut Formatter<'_>) -> Result {
-                    match self.0 {
-                        Some(ref x) => x.fmt(fmt),
-                        None => write!(fmt, "-"),
-                    }
-                }
-            }
-
-            let now = Timestamp::now();
-
-            info!(
-                target: "podsync::warp",
-                "{} {} \"{} {} {:?}\" {} \"{}\" \"{}\" {:?}",
-                OptFmt(info.remote_addr()),
-                match now {
-                    Ok(t) => t.to_string(),
-                    Err(e) => {
-                        error!("couldn't get time: {e:?}");
-                        "<notime>".into()
-                    }
-                },
-                info.method(),
-                info.path(),
-                info.version(),
-                info.status().as_u16(),
-                OptFmt(info.referer()),
-                OptFmt(info.user_agent()),
-                info.elapsed(),
-            );
-        }))
-        .recover(handle_rejection)
-}
-
-async fn result_to_json<F, B>(f: F) -> impl warp::Reply
-where
-    F: Future<Output = podsync::Result<B>>,
-    B: Serialize,
-{
-    match f.await {
-        Ok(body) => warp::reply::json(&body).into_response(),
-        Err(e) => err_to_warp(e).into_response(),
-    }
-}
-
-async fn result_to_ok<F>(f: F) -> impl warp::Reply
-where
-    F: Future<Output = podsync::Result<()>>,
-{
-    match f.await {
-        Ok(()) => warp::reply().into_response(),
-        Err(e) => err_to_warp(e).into_response(),
-    }
-}
-
-async fn result_to_headers<F>(f: F) -> impl warp::Reply
-where
-    F: Future<Output = podsync::Result<HeaderMap>>,
-{
-    match f.await {
-        Ok(header_map) => {
-            let mut resp = http::Response::builder();
-
-            match resp.headers_mut() {
-                Some(headers) => headers.extend(header_map),
-                None => {
-                    for (name, value) in header_map {
-                        if let Some(name) = name {
-                            resp = resp.header(name, value);
-                        }
-                    }
-                }
-            }
-
-            resp.body(Body::empty()).unwrap()
-        }
-        Err(e) => err_to_warp(e).into_response(),
-    }
-}
-
-fn err_to_warp(e: podsync::Error) -> impl warp::Reply {
-    warp::reply::with_status(warp::reply(), e.into())
-}
-
-#[derive(Copy, Clone, Debug)]
-enum UsernameFormat {
-    Name,
-    NameJson,
-}
-
-impl UsernameFormat {
-    pub fn convert<'a>(&self, username: &'a str) -> podsync::Result<&'a str> {
-        match self {
-            Self::Name => Ok(username),
-            Self::NameJson => split_format_json(username),
-        }
-    }
-}
-
-fn cookie_authorize(
-    username_fmt: UsernameFormat,
-    podsync: Arc<PodSync>,
-) -> impl Filter<Extract = (podsync::Result<PodSyncAuthed<true>>,), Error = warp::Rejection> + Clone
-{
-    warp::path::param::<String>()
-        .and(warp::cookie(COOKIE_NAME))
-        .then({
-            move |username: String, session_id: SessionId| {
-                let podsync = Arc::clone(&podsync);
-
-                async move {
-                    podsync
-                        .authenticate(session_id)
-                        .await?
-                        .with_user(username_fmt.convert(&username)?)
-                        .map(|authed| {
-                            debug!("authed (via cookie) user {}", authed.username());
-                            authed
-                        })
-                        .map_err(|e| {
-                            debug!("no auth via cookie");
-                            e
-                        })
-                }
-            }
-        })
-}
-
-fn login_authorize(
-    username_fmt: UsernameFormat,
-    podsync: Arc<PodSync>,
-) -> impl Filter<Extract = (podsync::Result<PodSyncAuthed<true>>,), Error = warp::Rejection> + Clone
-{
-    warp::path::param::<String>()
-        .and(warp::header("authorization"))
-        .and(warp::cookie::optional(COOKIE_NAME))
-        .then(
-            move |username: String, auth: BasicAuth, session_id: Option<SessionId>| {
-                info!("login auth");
-                let podsync = Arc::clone(&podsync);
-                async move {
-                    let username = username_fmt.convert(&username)?;
-                    let auth = auth.with_path_username(&username).map_err(|e| {
-                        error!("{e}");
-                        podsync::Error::Unauthorized
-                    })?;
-                    podsync.login(auth, session_id).await
-                }
-            },
+    Router::new()
+        .route("/", get(hello))
+        .route("/api/2/auth/:username/login.json", post(login))
+        .route("/api/2/auth/:username/logout.json", post(logout))
+        .route("/api/2/devices/:username_format", get(get_devices))
+        .route(
+            "/api/2/devices/:username/:device_format",
+            post(update_device),
         )
+        .route(
+            "/api/2/subscriptions/:username/:device_format",
+            get(get_subscriptions).post(update_subscriptions),
+        )
+        .route(
+            "/api/2/episodes/:username_format",
+            get(get_episodes).post(update_episodes),
+        )
+        .layer(middleware::from_fn(log_middleware))
+        .with_state(state)
 }
 
-fn authorize(
-    username_fmt: UsernameFormat,
-    podsync: Arc<PodSync>,
-) -> impl Filter<Extract = (PodSyncAuthed<true>,), Error = warp::Rejection> + Clone {
-    cookie_authorize(username_fmt, podsync.clone())
-        .or(login_authorize(username_fmt, podsync.clone()))
-        .unify()
-        .and_then(|auth: podsync::Result<_>| async move { auth.map_err(warp::reject::custom) })
+async fn hello() -> &'static str {
+    "PodSync is Working!"
 }
 
-async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
-    if let Some(err) = err.find::<podsync::Error>() {
-        Ok(err_to_warp(*err))
-    } else {
-        Err(err)
+async fn login(
+    State(state): State<AppState>,
+    AxumPath(username): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<(HeaderMap, StatusCode), podsync::Error> {
+    let auth_header = headers.get(header::AUTHORIZATION).ok_or_else(|| {
+        error!("couldn't auth {:?} - no auth header/cookie", username);
+        podsync::Error::Unauthorized
+    })?;
+
+    let auth_str = auth_header
+        .to_str()
+        .map_err(|_| podsync::Error::Unauthorized)?;
+    let auth: BasicAuth = auth_str.parse().map_err(|_| podsync::Error::Unauthorized)?;
+    let auth = auth.with_path_username(&username).map_err(|e| {
+        error!("{e}");
+        podsync::Error::Unauthorized
+    })?;
+
+    let session_id = extract_session_id(&headers);
+    let authed = state.podsync.login(auth, session_id).await?;
+    let session_id = authed.session_id();
+
+    let cookie = Cookie::build((COOKIE_NAME, session_id.to_string()))
+        .secure(state.secure)
+        .http_only(true)
+        .same_site(SameSite::Strict)
+        .max_age(2i64.weeks())
+        .path("/api");
+
+    let cookie_val =
+        HeaderValue::from_str(&cookie.to_string()).map_err(|_| podsync::Error::Internal)?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::SET_COOKIE, cookie_val);
+
+    Ok((response_headers, StatusCode::OK))
+}
+
+async fn logout(
+    State(state): State<AppState>,
+    AxumPath(username): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, podsync::Error> {
+    let authed = authorize_request(&state.podsync, &username, &headers).await?;
+    authed.logout().await?;
+    Ok(StatusCode::OK)
+}
+
+async fn get_devices(
+    State(state): State<AppState>,
+    AxumPath(username_format): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<device::DeviceAndSub>>, podsync::Error> {
+    let username = split_format_json(&username_format)?;
+    let authed = authorize_request(&state.podsync, username, &headers).await?;
+    let devs = authed.devices().await?;
+    Ok(Json(devs))
+}
+
+async fn update_device(
+    State(state): State<AppState>,
+    AxumPath((username, device_format)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    Json(device): Json<device::DeviceUpdate>,
+) -> Result<StatusCode, podsync::Error> {
+    let device_id = split_format_json(&device_format)?;
+    let authed = authorize_request(&state.podsync, &username, &headers).await?;
+    authed.update_device(device_id, device).await?;
+    Ok(StatusCode::OK)
+}
+
+async fn get_subscriptions(
+    State(state): State<AppState>,
+    AxumPath((username, device_format)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    Query(query): Query<QuerySince>,
+) -> Result<Json<subscription::SubscriptionChangesToClient>, podsync::Error> {
+    let device_id = split_format_json(&device_format)?;
+    let authed = authorize_request(&state.podsync, &username, &headers).await?;
+    let result = authed.subscriptions(device_id, query.since).await?;
+    Ok(Json(result))
+}
+
+async fn update_subscriptions(
+    State(state): State<AppState>,
+    AxumPath((username, device_format)): AxumPath<(String, String)>,
+    headers: HeaderMap,
+    Json(changes): Json<subscription::SubscriptionChangesFromClient>,
+) -> Result<Json<podsync::UpdatedUrls>, podsync::Error> {
+    let device_id = split_format_json(&device_format)?;
+    let authed = authorize_request(&state.podsync, &username, &headers).await?;
+    let result = authed.update_subscriptions(device_id, changes).await?;
+    Ok(Json(result))
+}
+
+async fn get_episodes(
+    State(state): State<AppState>,
+    AxumPath(username_format): AxumPath<String>,
+    headers: HeaderMap,
+    Query(query): Query<podsync::QueryEpisodes>,
+) -> Result<Json<episode::Episodes>, podsync::Error> {
+    let username = split_format_json(&username_format)?;
+    let authed = authorize_request(&state.podsync, username, &headers).await?;
+    let result = authed.episodes(query).await?;
+    Ok(Json(result))
+}
+
+async fn update_episodes(
+    State(state): State<AppState>,
+    AxumPath(username_format): AxumPath<String>,
+    headers: HeaderMap,
+    Json(body): Json<Vec<episode::Episode>>,
+) -> Result<Json<podsync::UpdatedUrls>, podsync::Error> {
+    let username = split_format_json(&username_format)?;
+    let authed = authorize_request(&state.podsync, username, &headers).await?;
+    let result = authed.update_episodes(body).await?;
+    Ok(Json(result))
+}
+
+fn extract_session_id(headers: &HeaderMap) -> Option<SessionId> {
+    let cookie_header = headers.get(header::COOKIE)?;
+    let cookie_str = cookie_header.to_str().ok()?;
+
+    for part in cookie_str.split(';') {
+        let part = part.trim();
+        if let Some((name, value)) = part.split_once('=') {
+            if name.trim() == COOKIE_NAME {
+                if let Ok(session_id) = value.trim().parse::<SessionId>() {
+                    return Some(session_id);
+                }
+            }
+        }
     }
+    None
+}
+
+async fn authorize_request(
+    podsync: &Arc<PodSync>,
+    username: &str,
+    headers: &HeaderMap,
+) -> podsync::Result<PodSyncAuthed<true>> {
+    if let Some(session_id) = extract_session_id(headers) {
+        // Cookie present: authenticate via session only, no fallback to basic auth
+        let authed = podsync.authenticate(session_id).await?;
+        return authed
+            .with_user(username)
+            .map(|a| {
+                debug!("authed (via cookie) user {}", a.username());
+                a
+            })
+            .map_err(|e| {
+                debug!("no auth via cookie");
+                e
+            });
+    }
+
+    // No cookie: require Authorization header
+    let auth_header = headers
+        .get(header::AUTHORIZATION)
+        .ok_or(podsync::Error::Unauthorized)?;
+    let auth_str = auth_header
+        .to_str()
+        .map_err(|_| podsync::Error::Unauthorized)?;
+
+    info!("login auth");
+    let auth: BasicAuth = auth_str.parse().map_err(|_| podsync::Error::Unauthorized)?;
+    let auth = auth.with_path_username(username).map_err(|e| {
+        error!("{e}");
+        podsync::Error::Unauthorized
+    })?;
+
+    podsync.login(auth, None).await
+}
+
+async fn log_middleware(req: Request, next: Next) -> Response {
+    use std::fmt::{self, Display, Formatter};
+
+    struct OptFmt<T>(Option<T>);
+
+    impl<T: Display> Display for OptFmt<T> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            match &self.0 {
+                Some(x) => x.fmt(f),
+                None => write!(f, "-"),
+            }
+        }
+    }
+
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let version = req.version();
+    let referer = req
+        .headers()
+        .get(header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let user_agent = req
+        .headers()
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+
+    let start = std::time::Instant::now();
+    let response = next.run(req).await;
+    let elapsed = start.elapsed();
+
+    let now = Timestamp::now();
+
+    info!(
+        target: "podsync::http",
+        "- {} \"{} {} {:?}\" {} \"{}\" \"{}\" {:?}",
+        match now {
+            Ok(t) => t.to_string(),
+            Err(e) => {
+                error!("couldn't get time: {e:?}");
+                "<notime>".into()
+            }
+        },
+        method,
+        uri,
+        version,
+        response.status().as_u16(),
+        OptFmt(referer),
+        OptFmt(user_agent),
+        elapsed,
+    );
+
+    response
 }
 
 #[cfg(test)]
 #[cfg(feature = "backend-sql")]
 mod test {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use sqlx::query;
+    use tower::ServiceExt;
 
     use super::*;
     use base64_light::base64_encode as base64;
@@ -415,11 +356,14 @@ mod test {
     async fn hello() {
         let db = backend::test::create_db().await;
         let podsync = Arc::new(PodSync::new(backend::Backend(db)));
-        let filter = routes(podsync, true);
+        let app = routes(podsync, true);
 
-        let res = warp::test::request().path("/").reply(&filter).await;
+        let res = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
 
-        assert_eq!(res.status(), 200);
+        assert_eq!(res.status(), StatusCode::OK);
     }
 
     #[tokio::test]
@@ -440,69 +384,108 @@ mod test {
         .await
         .unwrap();
 
-        let podsync = Arc::new(PodSync::new(backend::Backend(db)));
-        let filter = routes(podsync, true);
+        let app = routes(Arc::new(PodSync::new(backend::Backend(db))), true);
         let bob_auth = format!("Basic {}", base64(&format!("{}:{}", "bob", pass)));
 
         // logging in succeeds
-        let res = warp::test::request()
-            .path("/api/2/auth/bob/login.json")
-            .method("POST")
-            .header("authorization", &bob_auth)
-            .reply(&filter)
-            .await;
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/2/auth/bob/login.json")
+                    .method("POST")
+                    .header("authorization", &bob_auth)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(res.status(), 200);
+        assert_eq!(res.status(), StatusCode::OK);
 
         // and we're given a cookie
-        let cookie = res.headers().get("set-cookie").expect("session cookie");
-        let cookie = Cookie::parse(cookie.to_str().unwrap()).unwrap();
+        let cookie_header = res
+            .headers()
+            .get("set-cookie")
+            .expect("session cookie")
+            .clone();
+        let cookie = Cookie::parse(cookie_header.to_str().unwrap()).unwrap();
 
         assert_eq!(cookie.name(), COOKIE_NAME);
 
         // we can use this to get our devices:
-        let res = warp::test::request()
-            .path("/api/2/devices/bob.json")
-            .header("cookie", cookie.to_string())
-            .reply(&filter)
-            .await;
-        assert_eq!(res.status(), 200);
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/2/devices/bob.json")
+                    .header("cookie", cookie.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
 
         // a POST to /login with the same auth and a cookie will verify the cookie:
-        let res = warp::test::request()
-            .path("/api/2/auth/bob/login.json")
-            .method("POST")
-            .header("authorization", &bob_auth)
-            .header("cookie", cookie.to_string())
-            .reply(&filter)
-            .await;
-        assert_eq!(res.status(), 200);
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/2/auth/bob/login.json")
+                    .method("POST")
+                    .header("authorization", &bob_auth)
+                    .header("cookie", cookie.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
 
         // and a POST to /login with the wrong auth will reject:
         let tim_auth = format!("Basic {}", base64(&format!("{}:{}", "tim", "123")));
-        let res = warp::test::request()
-            .path("/api/2/auth/bob/login.json")
-            .method("POST")
-            .header("authorization", &tim_auth)
-            .header("cookie", cookie.to_string())
-            .reply(&filter)
-            .await;
-        assert_eq!(res.status(), 401);
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/2/auth/bob/login.json")
+                    .method("POST")
+                    .header("authorization", &tim_auth)
+                    .header("cookie", cookie.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
         // and logging out will invalidate the session
-        let res = warp::test::request()
-            .path("/api/2/auth/bob/logout.json")
-            .method("POST")
-            .header("cookie", cookie.to_string())
-            .reply(&filter)
-            .await;
-        assert_eq!(res.status(), 200);
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/2/auth/bob/logout.json")
+                    .method("POST")
+                    .header("cookie", cookie.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
 
-        let res = warp::test::request()
-            .path("/api/2/devices/bob.json")
-            .header("cookie", cookie.to_string())
-            .reply(&filter)
-            .await;
-        assert_eq!(res.status(), 401);
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/2/devices/bob.json")
+                    .header("cookie", cookie.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
 }
