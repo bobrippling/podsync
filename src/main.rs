@@ -1,16 +1,16 @@
 #![cfg_attr(feature = "backend-sql", allow(unexpected_cfgs))]
 #![cfg_attr(not(feature = "backend-sql"), deny(unexpected_cfgs))]
 
-use std::{path::Path, sync::Arc};
+use std::{net::SocketAddr, path::Path, sync::Arc};
 
 use ::time::ext::NumericalDuration;
 use axum::{
-    extract::{Path as AxumPath, Query, Request, State},
+    extract::{ConnectInfo, Path as AxumPath, Query, Request, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::{Json, Response},
     routing::{get, post},
-    Router,
+    RequestExt as _, Router,
 };
 use cookie::{Cookie, SameSite};
 use log::{debug, error, info};
@@ -78,7 +78,13 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("couldn't bind");
-    axum::serve(listener, app).await.expect("server error");
+
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("server error");
 }
 
 fn routes(podsync: Arc<PodSync>, secure: bool) -> Router {
@@ -283,7 +289,7 @@ async fn authorize_request(
     podsync.login(auth, None).await
 }
 
-async fn log_middleware(req: Request, next: Next) -> Response {
+async fn log_middleware(mut req: Request, next: Next) -> Response {
     use std::fmt::{self, Display, Formatter};
 
     struct OptFmt<T>(Option<T>);
@@ -310,6 +316,14 @@ async fn log_middleware(req: Request, next: Next) -> Response {
         .get(header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
+    let remote_addr: Option<SocketAddr> = req
+        .extract_parts()
+        .await
+        .map_err(|e| {
+            error!("couldn't extract address from request: {e}");
+        })
+        .ok()
+        .map(|ci: ConnectInfo<_>| ci.0);
 
     let start = std::time::Instant::now();
     let response = next.run(req).await;
@@ -319,7 +333,8 @@ async fn log_middleware(req: Request, next: Next) -> Response {
 
     info!(
         target: "podsync::http",
-        "- {} \"{} {} {:?}\" {} \"{}\" \"{}\" {:?}",
+        "{} {} \"{} {} {:?}\" {} \"{}\" \"{}\" {:?}",
+        OptFmt(remote_addr),
         match now {
             Ok(t) => t.to_string(),
             Err(e) => {
